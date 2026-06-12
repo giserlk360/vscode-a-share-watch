@@ -1,0 +1,36 @@
+# 依赖
+node_modules/
+
+# 构建输出
+dist/
+out/
+
+# VSCode 测试
+.vscode-test/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
+npm-debug.log*
+
+# 环境变量
+.env
+.env.local
+
+# TypeScript 增量编译缓存
+*.tsbuildinfo
+
+# 覆盖率报告
+coverage/
+
+# VSIX 打包文件
+*.vsix
+
+# Kiro 配置
+.kiro/
+
+# Pencil 设计文件
+*.pen

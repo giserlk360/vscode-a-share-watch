@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+    // 编译目标：Node.js 16+ 兼容
+    "target": "ES2020",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "lib": ["ES2020"],
+    // 输出目录
+    "outDir": "./out",
+    "rootDir": "./src",
+    // 严格模式
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    // 源码映射（调试用）
+    "sourceMap": true,
+    // 允许导入 JSON 文件
+    "resolveJsonModule": true,
+    // 允许默认导入
+    "esModuleInterop": true,
+    // 跳过库类型检查（加快编译速度）
+    "skipLibCheck": true,
+    // 声明文件
+    "declaration": true,
+    "declarationMap": true
+  },
+  "include": [
+    "src/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "out",
+    ".vscode-test"
+  ]
+}

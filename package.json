@@ -1,0 +1,183 @@
+{
+  "name": "vscode-stock-monitor",
+  "displayName": "注释看盘",
+  "description": "在代码注释中实时查看 A 股行情，支持涨跌幅、持仓盈亏、当日盈亏内联显示，状态栏轮播和价格预警",
+  "version": "0.0.4",
+  "publisher": "chenyangyang",
+  "icon": "resources/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Mrxulovemingming/vscode-stock-monitor"
+  },
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "stock",
+    "A股",
+    "股票",
+    "行情",
+    "监控"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "stock-monitor",
+          "title": "股票监控",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "stock-monitor": [
+        {
+          "id": "stockMonitor.stockView",
+          "name": "股票列表",
+          "type": "webview"
+        },
+        {
+          "id": "settingsView",
+          "name": "插件设置",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "vscode-stock-monitor.addStock",
+        "title": "添加股票",
+        "icon": "$(add)"
+      },
+      {
+        "command": "vscode-stock-monitor.editStock",
+        "title": "编辑股票",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "vscode-stock-monitor.deleteStock",
+        "title": "删除股票",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "vscode-stock-monitor.toggleCarousel",
+        "title": "切换状态栏轮播"
+      },
+      {
+        "command": "vscode-stock-monitor.toggleStealthMode",
+        "title": "切换隐蔽模式"
+      },
+      {
+        "command": "vscode-stock-monitor.refreshStocks",
+        "title": "刷新股票数据",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "vscode-stock-monitor.openSettings",
+        "title": "打开设置"
+      },
+      {
+        "command": "stock-monitor.addStock",
+        "title": "添加股票",
+        "icon": "$(add)"
+      },
+      {
+        "command": "stock-monitor.editStock",
+        "title": "编辑股票",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "stock-monitor.deleteStock",
+        "title": "删除股票",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "stock-monitor.refreshView",
+        "title": "刷新视图",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "stock-monitor.refreshView",
+          "when": "view == stockMonitor.stockView",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "股票监控",
+      "properties": {
+        "vscode-stock-monitor.refreshInterval": {
+          "type": "number",
+          "default": 10,
+          "description": "股票数据刷新间隔（秒）"
+        },
+        "vscode-stock-monitor.stealthMode": {
+          "type": "boolean",
+          "default": false,
+          "description": "隐蔽模式：使股票信息颜色与注释颜色一致"
+        },
+        "vscode-stock-monitor.carouselEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "启用状态栏股票轮播"
+        },
+        "vscode-stock-monitor.carouselInterval": {
+          "type": "number",
+          "default": 5,
+          "description": "状态栏轮播间隔（秒）"
+        },
+        "vscode-stock-monitor.alertMode": {
+          "type": "string",
+          "enum": [
+            "popup",
+            "intense",
+            "both"
+          ],
+          "default": "popup",
+          "description": "价格预警方式：popup（弹窗）、intense（高强度）、both（两者）"
+        },
+        "vscode-stock-monitor.popupTemplate": {
+          "type": "string",
+          "default": "⚠️ {name} 已达目标价！当前价格：{price}，涨跌幅：{changeRate}%",
+          "description": "弹窗提示内容模板，支持 {name}、{price}、{changeRate} 占位符"
+        },
+        "vscode-stock-monitor.alertDuration": {
+          "type": "number",
+          "default": 60,
+          "description": "高强度预警状态栏固定显示时长（秒）"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "node build.js --production",
+    "build": "node build.js",
+    "watch": "node build.js --watch",
+    "test": "node ./out/test/runTest.js",
+    "test:unit": "npx jest --testPathPattern=src/test/unit",
+    "test:property": "npx jest --testPathPattern=src/test/property",
+    "lint": "eslint src --ext ts",
+    "compile": "tsc -p ./"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/node": "^18.19.130",
+    "@types/vscode": "^1.80.0",
+    "@vscode/test-electron": "^2.5.2",
+    "esbuild": "^0.19.12",
+    "fast-check": "^3.23.2",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.4.9",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,43 @@
+# VSCode 插件发布时忽略的文件
+# 这些文件不会被打包进 .vsix 安装包
+
+# 源码（已打包进 dist/）
+src/
+out/
+
+# 构建工具和配置
+build.js
+tsconfig.json
+.eslintrc*
+.prettierrc*
+jest.config*
+
+# 测试文件
+src/test/
+**/*.test.ts
+**/*.spec.ts
+
+# 开发依赖
+node_modules/
+
+# 版本控制
+.git/
+.gitignore
+
+# 编辑器配置
+.vscode/
+!.vscode/extensions.json
+
+# 临时文件
+*.log
+.DS_Store
+Thumbs.db
+
+# 规格文档（开发用）
+.kiro/
+
+# 设计稿文件
+*.pen
+
+# 临时未命名文件
+Untitled-*
