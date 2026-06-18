@@ -265,8 +265,10 @@ export const DEFAULT_SETTINGS: PluginSettings = {
  * globalState 存储键名常量
  */
 export const STORAGE_KEYS = {
-  /** 股票列表存储键 */
+  /** 股票列表存储键（自选股） */
   STOCKS: 'vscode-stock-monitor.stocks',
+  /** 持有股存储键 */
+  PORTFOLIO: 'vscode-stock-monitor.portfolio',
   /** 插件设置存储键 */
   SETTINGS: 'vscode-stock-monitor.settings',
   /** 预警历史存储键 */

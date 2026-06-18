@@ -46,11 +46,23 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
         case 'addStock':
           await this._handleAdd(msg);
           break;
+        case 'addPortfolio':
+          await this._handleAddPortfolio(msg);
+          break;
         case 'editStock':
           await this._handleEdit(msg);
           break;
+        case 'editPortfolio':
+          await this._handleEditPortfolio(msg);
+          break;
         case 'deleteStock':
-          await this._handleDelete(msg.code);
+          await this._handleDelete(msg.code, msg.fromTab || 'watchlist');
+          break;
+        case 'importStocks':
+          await this._handleImport(msg.lines);
+          break;
+        case 'exportStocks':
+          await this._handleExport();
           break;
       }
     });
@@ -69,8 +81,8 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
   private _sendStockList(): void {
     if (!this._view) { return; }
     const settings = this.priceMonitor.getSettings();
-    const entries = this.stockManager.getAll();
-    const list = entries.map(e => {
+
+    const mapEntry = (e: StockEntry) => {
       const live = this.liveDataMap.get(e.code);
       return {
         code: e.code,
@@ -85,7 +97,10 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
         targetPrice: e.targetPrice,
         targetChangeRate: e.targetChangeRate,
       };
-    });
+    };
+
+    const watchlist = this.stockManager.getAll().map(mapEntry);
+    const portfolio = this.stockManager.getPortfolio().map(mapEntry);
 
     // 收集启用的指数数据
     const customKeywords = settings.customKeywords || {};
@@ -104,7 +119,7 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
       }
     }
 
-    this._view.webview.postMessage({ type: 'stockList', list, indices });
+    this._view.webview.postMessage({ type: 'stockList', watchlist, portfolio, indices });
   }
 
   private async _handleSearch(keyword: string): Promise<void> {
@@ -187,9 +202,48 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
     }
   }
 
-  private async _handleDelete(code: string): Promise<void> {
+  private async _handleAddPortfolio(msg: any): Promise<void> {
     try {
-      const entries = this.stockManager.getAll();
+      const entry: StockEntry = {
+        code: msg.code,
+        name: msg.name,
+        alias: msg.alias?.trim() || undefined,
+        purchasePrice: msg.purchasePrice > 0 ? msg.purchasePrice : undefined,
+        shares: msg.shares > 0 ? msg.shares : undefined,
+        alertEnabled: !!msg.alertEnabled,
+        targetPrice: msg.targetPrice > 0 ? msg.targetPrice : undefined,
+        targetChangeRate: msg.targetChangeRate > 0 ? msg.targetChangeRate : undefined,
+        carouselEnabled: true,
+        addedAt: Date.now(),
+      };
+      await this.stockManager.addPortfolio(entry);
+      this._sendStockList();
+      this._view?.webview.postMessage({ type: 'addSuccess' });
+    } catch (err) {
+      this._view?.webview.postMessage({ type: 'error', text: (err as Error).message });
+    }
+  }
+
+  private async _handleEditPortfolio(msg: any): Promise<void> {
+    try {
+      await this.stockManager.updatePortfolio(msg.code, {
+        alias: msg.alias?.trim() || undefined,
+        purchasePrice: msg.purchasePrice > 0 ? msg.purchasePrice : undefined,
+        shares: msg.shares > 0 ? msg.shares : undefined,
+        alertEnabled: !!msg.alertEnabled,
+        targetPrice: msg.targetPrice > 0 ? msg.targetPrice : undefined,
+        targetChangeRate: msg.targetChangeRate > 0 ? msg.targetChangeRate : undefined,
+      });
+      this._sendStockList();
+      this._view?.webview.postMessage({ type: 'editSuccess' });
+    } catch (err) {
+      this._view?.webview.postMessage({ type: 'error', text: (err as Error).message });
+    }
+  }
+
+  private async _handleDelete(code: string, tab: 'watchlist' | 'portfolio'): Promise<void> {
+    try {
+      const entries = tab === 'portfolio' ? this.stockManager.getPortfolio() : this.stockManager.getAll();
       const entry = entries.find(e => e.code === code);
       const name = entry?.name || code;
       const answer = await vscode.window.showWarningMessage(
@@ -198,12 +252,143 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
         '删除'
       );
       if (answer !== '删除') { return; }
-      await this.stockManager.remove(code);
-      this.liveDataMap.delete(code);
+      if (tab === 'portfolio') {
+        await this.stockManager.removePortfolio(code);
+      } else {
+        await this.stockManager.remove(code);
+      }
       this._sendStockList();
     } catch (err) {
       this._view?.webview.postMessage({ type: 'error', text: (err as Error).message });
     }
+  }
+
+  private async _handleImport(lines: string[]): Promise<void> {
+    if (!this._view) { return; }
+
+    const resolved: Array<{ code: string; name: string }> = [];
+    const failed: string[] = [];
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) { continue; }
+
+      // 判断是代码还是名称
+      const codeRegex = /^(sh|sz)?\d{6}$/i;
+      if (codeRegex.test(trimmed)) {
+        // 代码行：标准化前缀，再搜索获取名称
+        const normalizedCode = this.dataProvider.resolveMarketPrefix(trimmed);
+        try {
+          const pureDigits = normalizedCode.replace(/^(sh|sz)/i, '');
+          const searchResults = await this._searchStocks(pureDigits);
+          const exact = searchResults.find(r => r.code.toLowerCase() === normalizedCode.toLowerCase());
+          if (exact) {
+            resolved.push({ code: exact.code, name: exact.name });
+          } else if (searchResults.length > 0) {
+            resolved.push({ code: searchResults[0].code, name: searchResults[0].name });
+          } else {
+            resolved.push({ code: normalizedCode, name: normalizedCode });
+          }
+        } catch {
+          resolved.push({ code: normalizedCode, name: normalizedCode });
+        }
+      } else {
+        // 名称行：搜索 API 查找
+        try {
+          const searchResults = await this._searchStocks(trimmed);
+          if (searchResults.length > 0) {
+            resolved.push({ code: searchResults[0].code, name: searchResults[0].name });
+          } else {
+            failed.push(trimmed);
+          }
+        } catch {
+          failed.push(trimmed);
+        }
+      }
+      // 每次请求后短暂延迟，避免 API 限流
+      await new Promise(r => setTimeout(r, 200));
+    }
+
+    // 构造 StockEntry 数组
+    const entries: StockEntry[] = resolved.map(r => ({
+      code: r.code,
+      name: r.name,
+      alertEnabled: false,
+      carouselEnabled: true,
+      addedAt: Date.now(),
+    }));
+
+    // 调用批量添加
+    const batchResult = await this.stockManager.addBatch(entries);
+
+    // 合并解析失败和批量添加失败的结果
+    const mergedResult = {
+      added: batchResult.added,
+      skipped: batchResult.skipped,
+      failed: batchResult.failed + failed.length,
+      errors: [...batchResult.errors, ...failed.map(f => `未找到: ${f}`)],
+    };
+
+    // 刷新列表
+    this._sendStockList();
+
+    // 发送结果回 webview
+    this._view.webview.postMessage({ type: 'importResult', result: mergedResult });
+  }
+
+  private async _handleExport(): Promise<void> {
+    const entries = this.stockManager.getAll();
+    if (entries.length === 0) {
+      vscode.window.showInformationMessage('暂无股票可导出');
+      return;
+    }
+
+    // 选择导出格式
+    const format = await vscode.window.showQuickPick([
+      { label: '代码', description: '每行一个股票代码（如 sh600036）' },
+      { label: '名称', description: '每行一个股票名称（如 招商银行）' },
+      { label: '代码 + 名称', description: '每行代码和名称（如 sh600036 招商银行）' },
+      { label: 'JSON 完整数据', description: '包含所有字段的 JSON 格式，可用于导入还原' },
+    ], { placeHolder: '选择导出格式' });
+    if (!format) { return; }
+
+    let content: string;
+    let ext: string;
+    const stocks = entries.map(e => {
+      const code = e.code.startsWith('sh') || e.code.startsWith('sz')
+        ? e.code.replace(/^(sh|sz)/i, '') : e.code;
+      return { code, name: e.name };
+    });
+
+    switch (format.label) {
+      case '代码':
+        content = stocks.map(s => s.code).join('\n');
+        ext = 'txt';
+        break;
+      case '名称':
+        content = stocks.map(s => s.name).join('\n');
+        ext = 'txt';
+        break;
+      case '代码 + 名称':
+        content = stocks.map(s => s.code + ' ' + s.name).join('\n');
+        ext = 'txt';
+        break;
+      case 'JSON 完整数据':
+      default:
+        content = this.stockManager.exportJSON();
+        ext = 'json';
+        break;
+    }
+
+    const uri = await vscode.window.showSaveDialog({
+      defaultUri: vscode.Uri.file(`stock-export.${ext}`),
+      title: '导出自选股',
+      filters: ext === 'json' ? { 'JSON': ['json'] } : { '文本': ['txt'] },
+    });
+    if (!uri) { return; }
+    const encoder = new TextEncoder();
+    await vscode.workspace.fs.writeFile(uri, encoder.encode(content));
+    vscode.window.showInformationMessage(`已导出 ${entries.length} 只股票到 ${uri.fsPath}`);
   }
 
   private _sendDisplayOptions(): void {
@@ -284,13 +469,38 @@ body{font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-for
 .alert-check input{cursor:pointer}
 .alert-fields{display:none;padding-left:4px}
 .alert-fields.active{display:block}
+/* Tab 栏 */
+.tab-bar{display:flex;border-bottom:1px solid var(--vscode-widget-border);background:var(--vscode-editor-background)}
+.tab-btn{flex:1;padding:6px 0;font-size:11px;font-weight:500;background:none;border:none;border-bottom:2px solid transparent;color:var(--vscode-foreground);cursor:pointer;opacity:.7;transition:opacity .15s,border-color .15s}
+.tab-btn:hover{opacity:1}
+.tab-btn.active{opacity:1;border-bottom-color:var(--vscode-focusBorder);font-weight:600}
+.toolbar-actions{display:flex;gap:4px}
+.sort-active{color:var(--vscode-focusBorder)!important;opacity:1!important}
+/* 导入弹窗 */
+#importView textarea{width:100%;background:var(--vscode-input-background);border:1px solid var(--vscode-input-border);color:var(--vscode-input-foreground);font-size:12px;padding:6px 8px;outline:none;resize:vertical;font-family:var(--vscode-font-family);line-height:1.4}
+#importView textarea:focus{border-color:var(--vscode-focusBorder)}
+#importView textarea::placeholder{color:var(--vscode-input-placeholderForeground)}
+.import-result{font-size:11px;padding:8px;background:var(--vscode-input-background);border:1px solid var(--vscode-widget-border);border-radius:3px;margin-bottom:8px;line-height:1.5}
+.ir-ok{color:#73C991}
+.ir-skip{color:var(--vscode-descriptionForeground)}
+.ir-fail{color:var(--vscode-errorForeground)}
+.import-progress{padding:4px 0;margin-bottom:4px}
 </style>
 </head>
 <body>
 <div id="listView">
+  <div class="tab-bar">
+    <button class="tab-btn active" id="tabWatchlist" data-tab="watchlist">自选股</button>
+    <button class="tab-btn" id="tabPortfolio" data-tab="portfolio">持有股</button>
+  </div>
   <div class="toolbar">
-    <span class="toolbar-title">股票列表</span>
-    <button class="toolbar-btn" id="addBtn" title="添加股票">＋</button>
+    <span class="toolbar-title" id="toolbarTitle">自选股</span>
+    <div class="toolbar-actions">
+      <button class="toolbar-btn" id="sortBtn" title="按涨跌幅排序">↕</button>
+      <button class="toolbar-btn" id="exportBtn" title="导出">导出</button>
+      <button class="toolbar-btn" id="importBtn" title="导入">导入</button>
+      <button class="toolbar-btn" id="addBtn" title="添加股票">＋</button>
+    </div>
   </div>
   <div id="stockList" class="stock-list"></div>
   <div id="totalBar" class="total-bar" style="display:none">
@@ -310,20 +520,20 @@ body{font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-for
     <input id="codeInput" placeholder="输入代码或名称搜索..." autocomplete="off">
     <div id="searchResults" class="search-results"></div>
   </div>
-  <div class="field">
+  <div class="field" id="aliasField">
     <label>别名（可选）</label>
     <input id="aliasInput" placeholder="自定义别名...">
   </div>
-  <div class="field">
+  <div class="field" id="priceField">
     <label>买入价格（可选）</label>
     <input id="priceInput" type="number" min="0" step="0.01" placeholder="买入价格">
   </div>
-  <div class="field">
+  <div class="field" id="sharesField">
     <label>持仓数量（可选，须为100的倍数）</label>
     <input id="sharesInput" type="number" min="0" step="100" placeholder="如: 100, 200...">
     <div class="hint">A股最小交易单位为100股（1手）</div>
   </div>
-  <div class="alert-section">
+  <div class="alert-section" id="alertSection">
     <label class="alert-check"><input type="checkbox" id="alertEnabledCheck"> 启用价格预警</label>
     <div class="alert-fields" id="alertFields">
       <div class="field">
@@ -343,6 +553,23 @@ body{font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-for
     <button class="btn btn-ok" id="okBtn">确定</button>
   </div>
 </div>
+<div id="importView" class="form-overlay">
+  <div class="form-title">批量导入股票</div>
+  <div class="field">
+    <label>股票代码/名称（每行一个）</label>
+    <textarea id="importInput" rows="8" placeholder="支持格式：&#10;sh600036&#10;000001&#10;招商银行&#10;&#10;每行一只股票，支持代码或名称"></textarea>
+    <div class="hint">支持6位数字代码（如600036）、带前缀代码（如sh600036）或股票名称</div>
+  </div>
+  <div id="importProgress" class="import-progress" style="display:none">
+    <span class="toolbar-title">正在导入，请稍候...</span>
+  </div>
+  <div id="importResult" class="import-result" style="display:none"></div>
+  <div class="form-error" id="importError" style="display:none"></div>
+  <div class="form-btns">
+    <button class="btn btn-cancel" id="importCancelBtn">取消</button>
+    <button class="btn btn-ok" id="importOkBtn">导入</button>
+  </div>
+</div>
 <script>
 const vscode = acquireVsCodeApi();
 const $ = id => document.getElementById(id);
@@ -351,15 +578,31 @@ let editCode = null; // 非 null 时为编辑模式
 let selectedResult = null; // 搜索选中的结果 {code, name}
 let searchTimer = null;
 let displayOpts = { showCode:true, showCurrentPrice:true, showChangeRate:true, showPurchasePrice:true, showShares:true, showProfit:true, showPositionChangeRate:false, showPositionAmount:false };
+let activeTab = 'watchlist'; // 当前激活的 Tab
+let allWatchlistData = null;   // 缓存自选股数据
+let allPortfolioData = null;   // 缓存持有股数据
+let allIndicesData = null;   // 缓存指数数据
+let sortOrder = null;         // null=默认, 'desc'=涨幅优先, 'asc'=跌幅优先
+let formTab = 'watchlist';    // 当前表单操作的 Tab 来源
 
 // ── 消息处理 ──
 window.addEventListener('message', e => {
   const msg = e.data;
-  if (msg.type === 'stockList') renderList(msg);
+  if (msg.type === 'stockList') {
+    allWatchlistData = msg.watchlist;
+    allPortfolioData = msg.portfolio;
+    allIndicesData = msg.indices || [];
+    renderList(msg, activeTab);
+  }
   if (msg.type === 'searchResult') renderSearchResults(msg.results);
   if (msg.type === 'addSuccess' || msg.type === 'editSuccess') showList();
-  if (msg.type === 'error') { $('formError').textContent = msg.text; $('formError').style.display = 'block'; }
+  if (msg.type === 'error') {
+    const errDiv = $('importView').classList.contains('active') ? $('importError') : $('formError');
+    errDiv.textContent = msg.text;
+    errDiv.style.display = 'block';
+  }
   if (msg.type === 'displayOptions') applyDisplayOptions(msg.options);
+  if (msg.type === 'importResult') showImportResult(msg);
 });
 
 // ── 显示设置（由插件设置面板控制） ──
@@ -369,9 +612,19 @@ function applyDisplayOptions(opts) {
 }
 
 // ── 渲染股票列表 ──
-function renderList(msg) {
-  const list = msg.list;
+function renderList(msg, tab) {
+  tab = tab || 'watchlist';
+  const list = tab === 'portfolio' ? (msg.portfolio || []) : (msg.watchlist || []);
   const indices = msg.indices || [];
+
+  // 按涨跌幅排序
+  if (sortOrder === 'desc' || sortOrder === 'asc') {
+    list = [...list].sort((a, b) => {
+      const ra = a.changeRate ?? 0;
+      const rb = b.changeRate ?? 0;
+      return sortOrder === 'desc' ? rb - ra : ra - rb;
+    });
+  }
   const container = $('stockList');
   const empty = $('emptyMsg');
   const totalBar = $('totalBar');
@@ -494,7 +747,7 @@ function renderList(msg) {
       const item = e.target.closest('.stock-item');
       const code = item.dataset.code;
       const s = list.find(x => x.code === code);
-      if (s) showForm(s);
+      if (s) showForm(s, activeTab);
     });
   });
   container.querySelectorAll('.del-btn').forEach(btn => {
@@ -503,7 +756,7 @@ function renderList(msg) {
       const code = item.dataset.code;
       const s = list.find(x => x.code === code);
       if (s) {
-        vscode.postMessage({ type: 'deleteStock', code });
+        vscode.postMessage({ type: 'deleteStock', code, fromTab: activeTab });
       }
     });
   });
@@ -534,9 +787,10 @@ function renderSearchResults(results) {
 }
 
 // ── 显示添加/编辑表单 ──
-function showForm(stock) {
+function showForm(stock, tab) {
+  formTab = tab || activeTab;
   editCode = stock ? stock.code : null;
-  $('formTitle').textContent = stock ? '编辑股票：' + stock.name : '添加股票';
+  $('formTitle').textContent = stock ? '编辑股票：' + stock.name : (formTab === 'portfolio' ? '添加持有股' : '添加股票');
   $('codeField').style.display = stock ? 'none' : 'block';
   $('codeInput').value = '';
   $('aliasInput').value = stock ? (stock.alias || '') : '';
@@ -550,6 +804,15 @@ function showForm(stock) {
   $('formError').style.display = 'none';
   $('searchResults').classList.remove('active');
   selectedResult = null;
+
+  // 新增时隐藏别名和持仓相关字段，编辑模式始终显示全部
+  const isAdd = !stock;
+  const isWatchlistAdd = isAdd && formTab === 'watchlist';
+  $('aliasField').style.display = isAdd ? 'none' : '';
+  $('priceField').style.display = isWatchlistAdd ? 'none' : '';
+  $('sharesField').style.display = isWatchlistAdd ? 'none' : '';
+  $('alertSection').style.display = isWatchlistAdd ? 'none' : '';
+
   $('listView').style.display = 'none';
   $('formView').classList.add('active');
   if (!stock) $('codeInput').focus();
@@ -563,7 +826,7 @@ function showList() {
 }
 
 // ── 事件绑定 ──
-$('addBtn').addEventListener('click', () => showForm(null));
+$('addBtn').addEventListener('click', () => showForm(null, activeTab));
 $('cancelBtn').addEventListener('click', showList);
 
 $('codeInput').addEventListener('input', e => {
@@ -608,20 +871,106 @@ $('okBtn').addEventListener('click', () => {
   $('formError').style.display = 'none';
 
   if (editCode) {
-    vscode.postMessage({ type: 'editStock', code: editCode, alias, purchasePrice, shares, alertEnabled, targetPrice, targetChangeRate });
+    const editType = formTab === 'portfolio' ? 'editPortfolio' : 'editStock';
+    vscode.postMessage({ type: editType, code: editCode, alias, purchasePrice, shares, alertEnabled, targetPrice, targetChangeRate });
   } else {
     if (!selectedResult) {
       $('formError').textContent = '请先搜索并选择一只股票';
       $('formError').style.display = 'block';
       return;
     }
+    const addType = formTab === 'portfolio' ? 'addPortfolio' : 'addStock';
     vscode.postMessage({
-      type: 'addStock',
+      type: addType,
       code: selectedResult.code,
       name: selectedResult.name,
       alias, purchasePrice, shares, alertEnabled, targetPrice, targetChangeRate,
     });
   }
+});
+
+// ── Tab 切换 ──
+function switchTab(tab) {
+  activeTab = tab;
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tab);
+  });
+  $('importBtn').style.display = tab === 'watchlist' ? 'inline' : 'none';
+  $('toolbarTitle').textContent = tab === 'watchlist' ? '自选股' : '持有股';
+  if (allWatchlistData !== null) {
+    renderList({ watchlist: allWatchlistData, portfolio: allPortfolioData, indices: allIndicesData }, tab);
+  }
+}
+$('tabWatchlist').addEventListener('click', () => switchTab('watchlist'));
+$('tabPortfolio').addEventListener('click', () => switchTab('portfolio'));
+
+// ── 涨跌幅排序 ──
+$('sortBtn').addEventListener('click', () => {
+  sortOrder = sortOrder === 'desc' ? 'asc' : sortOrder === 'asc' ? null : 'desc';
+  $('sortBtn').classList.toggle('sort-active', sortOrder !== null);
+  $('sortBtn').textContent = sortOrder === 'desc' ? '↓' : sortOrder === 'asc' ? '↑' : '↕';
+  if (allWatchlistData !== null) {
+    renderList({ watchlist: allWatchlistData, portfolio: allPortfolioData, indices: allIndicesData }, activeTab);
+  }
+});
+
+// ── 导入弹窗 ──
+function showImport() {
+  $('importInput').value = '';
+  $('importError').style.display = 'none';
+  $('importResult').style.display = 'none';
+  $('importProgress').style.display = 'none';
+  $('importOkBtn').disabled = false;
+  $('importOkBtn').textContent = '导入';
+  $('listView').style.display = 'none';
+  $('importView').classList.add('active');
+  $('importInput').focus();
+}
+
+function hideImport() {
+  $('importView').classList.remove('active');
+  $('listView').style.display = 'block';
+}
+
+function showImportResult(msg) {
+  $('importProgress').style.display = 'none';
+  $('importOkBtn').disabled = false;
+  $('importOkBtn').textContent = '导入';
+  const r = msg.result;
+  let html = '<span class="ir-ok">成功添加: ' + r.added + ' 只</span>';
+  if (r.skipped > 0) html += '<br><span class="ir-skip">已存在跳过: ' + r.skipped + ' 只</span>';
+  if (r.failed > 0) {
+    html += '<br><span class="ir-fail">失败: ' + r.failed + ' 只</span>';
+    if (r.errors.length > 0) {
+      html += '<div style="margin-top:4px;opacity:.8">' + r.errors.map(esc).join('<br>') + '</div>';
+    }
+  }
+  $('importResult').innerHTML = html;
+  $('importResult').style.display = 'block';
+}
+
+$('importBtn').addEventListener('click', showImport);
+$('importCancelBtn').addEventListener('click', hideImport);
+
+$('importOkBtn').addEventListener('click', () => {
+  const text = $('importInput').value.trim();
+  if (!text) {
+    $('importError').textContent = '请输入股票代码或名称';
+    $('importError').style.display = 'block';
+    return;
+  }
+  $('importError').style.display = 'none';
+  $('importResult').style.display = 'none';
+  $('importProgress').style.display = 'block';
+  $('importOkBtn').disabled = true;
+  $('importOkBtn').textContent = '导入中...';
+  const lines = text.split('\\n').map(l => l.trim()).filter(l => l.length > 0);
+  vscode.postMessage({ type: 'importStocks', lines });
+});
+
+// ── 导出 ──
+$('exportBtn').addEventListener('click', () => {
+  vscode.postMessage({ type: 'exportStocks' });
 });
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }

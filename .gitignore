@@ -32,5 +32,11 @@ coverage/
 # Kiro 配置
 .kiro/
 
+# Claude Code
+.claude/
+
+# Codegraph
+.codegraph/
+
 # Pencil 设计文件
 *.pen

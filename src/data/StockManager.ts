@@ -8,7 +8,20 @@ import { StockEntry, ExportData, STORAGE_KEYS } from '../types';
 
 // ─── 接口定义 ────────────────────────────────────────────────────────────────
 
+/** 批量导入结果摘要 */
+export interface ImportBatchResult {
+  /** 成功添加数量 */
+  added: number;
+  /** 已存在跳过数量 */
+  skipped: number;
+  /** 失败数量（无效代码 + 解析失败） */
+  failed: number;
+  /** 每条失败项的描述 */
+  errors: string[];
+}
+
 export interface IStockManager {
+  // 自选股 CRUD
   add(entry: StockEntry): Promise<void>;
   remove(code: string): Promise<void>;
   update(code: string, patch: Partial<StockEntry>): Promise<void>;
@@ -17,6 +30,12 @@ export interface IStockManager {
   findByKeyword(keyword: string): StockEntry | undefined;
   exportJSON(): string;
   importJSON(json: string): Promise<void>;
+  addBatch(entries: StockEntry[]): Promise<ImportBatchResult>;
+  // 持有股 CRUD
+  addPortfolio(entry: StockEntry): Promise<void>;
+  removePortfolio(code: string): Promise<void>;
+  updatePortfolio(code: string, patch: Partial<StockEntry>): Promise<void>;
+  getPortfolio(): StockEntry[];
 }
 
 // ─── 常量 ─────────────────────────────────────────────────────────────────────
@@ -31,8 +50,10 @@ const CODE_PURE_DIGITS_REGEX = /^\d{6}$/;
 // ─── StockManager 主类 ────────────────────────────────────────────────────────
 
 export class StockManager implements IStockManager {
-  /** 内存中的股票列表 */
+  /** 内存中的自选股列表 */
   private stocks: StockEntry[] = [];
+  /** 内存中的持有股列表 */
+  private portfolio: StockEntry[] = [];
 
   /** VSCode 扩展上下文，用于访问 globalState */
   private context: vscode.ExtensionContext;
@@ -45,6 +66,7 @@ export class StockManager implements IStockManager {
     this.context = context;
     // 初始化时从 globalState 加载已有数据
     this._loadFromStorage();
+    this._loadPortfolioFromStorage();
   }
 
   // ── 代码有效性验证 ────────────────────────────────────────────────────────────
@@ -240,6 +262,102 @@ export class StockManager implements IStockManager {
     await this._saveToStorage();
   }
 
+  /**
+   * 批量添加股票，跳过已存在的代码（合并式导入，不替换现有列表）
+   * @param entries 待添加的股票条目数组
+   * @returns 导入结果摘要
+   */
+  async addBatch(entries: StockEntry[]): Promise<ImportBatchResult> {
+    const result: ImportBatchResult = { added: 0, skipped: 0, failed: 0, errors: [] };
+
+    for (const entry of entries) {
+      // 验证代码有效性
+      if (!StockManager.isValidCode(entry.code)) {
+        result.failed++;
+        result.errors.push(`无效代码: ${entry.code}`);
+        continue;
+      }
+
+      // 去重检查（忽略大小写）
+      const normalizedCode = entry.code.toLowerCase();
+      const exists = this.stocks.some(s => s.code.toLowerCase() === normalizedCode);
+      if (exists) {
+        result.skipped++;
+        continue;
+      }
+
+      // 添加到内存列表（默认值 + entry 可选字段，code/名称/内部字段始终用标准值）
+      const { code: _c, name: _n, alertEnabled: _a, carouselEnabled: _ca, addedAt: _at, ...safeEntry } = entry;
+      this.stocks.push({
+        code: normalizedCode,
+        name: entry.name || entry.code,
+        alertEnabled: false,
+        carouselEnabled: true,
+        addedAt: Date.now(),
+        ...safeEntry,
+      });
+      result.added++;
+    }
+
+    // 有新增时统一持久化
+    if (result.added > 0) {
+      await this._saveToStorage();
+    }
+
+    return result;
+  }
+
+  // ── 持有股 CRUD ──────────────────────────────────────────────────────────────
+
+  /**
+   * 添加股票到持有股列表
+   * 与自选股独立存储，不检查自选股重复
+   */
+  async addPortfolio(entry: StockEntry): Promise<void> {
+    if (!StockManager.isValidCode(entry.code)) {
+      throw new Error(`无效的股票代码：${entry.code}。代码必须是带前缀（sh/sz）的6位数字，或纯6位数字。`);
+    }
+    const normalizedCode = entry.code.toLowerCase();
+    const exists = this.portfolio.some(s => s.code.toLowerCase() === normalizedCode);
+    if (exists) {
+      throw new Error(`股票代码 ${entry.code} 已存在于持有股列表中。`);
+    }
+    this.portfolio.push({ ...entry, code: normalizedCode });
+    await this._savePortfolioToStorage();
+  }
+
+  /**
+   * 从持有股列表中删除股票
+   */
+  async removePortfolio(code: string): Promise<void> {
+    const normalizedCode = code.toLowerCase();
+    const index = this.portfolio.findIndex(s => s.code.toLowerCase() === normalizedCode);
+    if (index === -1) { return; }
+    this.portfolio.splice(index, 1);
+    await this._savePortfolioToStorage();
+  }
+
+  /**
+   * 更新持有股信息
+   */
+  async updatePortfolio(code: string, patch: Partial<StockEntry>): Promise<void> {
+    const normalizedCode = code.toLowerCase();
+    const index = this.portfolio.findIndex(s => s.code.toLowerCase() === normalizedCode);
+    if (index === -1) {
+      throw new Error(`股票代码 ${code} 不存在于持有股列表中。`);
+    }
+    const { code: _ignoredCode, ...safePatch } = patch;
+    this.portfolio[index] = { ...this.portfolio[index], ...safePatch };
+    await this._savePortfolioToStorage();
+  }
+
+  /**
+   * 获取所有持有股列表
+   */
+  getPortfolio(): StockEntry[] {
+    return [...this.portfolio];
+  }
+
   // ── 私有方法 ──────────────────────────────────────────────────────────────────
 
   /**
@@ -268,6 +386,35 @@ export class StockManager implements IStockManager {
       await this.context.globalState.update(STORAGE_KEYS.STOCKS, this.stocks);
     } catch (e) {
       console.error('[StockManager] 持久化到 globalState 失败:', e);
+      throw new Error(`持久化失败：${(e as Error).message}`);
+    }
+  }
+
+  /**
+   * 从 globalState 加载持有股数据
+   */
+  private _loadPortfolioFromStorage(): void {
+    try {
+      const stored = this.context.globalState.get<StockEntry[]>(STORAGE_KEYS.PORTFOLIO);
+      if (Array.isArray(stored)) {
+        this.portfolio = stored;
+      } else {
+        this.portfolio = [];
+      }
+    } catch (e) {
+      console.error('[StockManager] 加载持有股数据失败，使用空列表初始化:', e);
+      this.portfolio = [];
+    }
+  }
+
+  /**
+   * 将持有股数据持久化到 globalState
+   */
+  private async _savePortfolioToStorage(): Promise<void> {
+    try {
+      await this.context.globalState.update(STORAGE_KEYS.PORTFOLIO, this.portfolio);
+    } catch (e) {
+      console.error('[StockManager] 持久化持有股到 globalState 失败:', e);
       throw new Error(`持久化失败：${(e as Error).message}`);
     }
   }

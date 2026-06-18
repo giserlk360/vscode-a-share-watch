@@ -220,9 +220,12 @@ export class PriceMonitor implements IPriceMonitor {
    * 3. 将结果分发给各已注册的组件
    */
   private async _refresh(): Promise<void> {
-    // 获取当前监控的股票代码列表
-    const entries = this.stockManager.getAll();
-
+    // 合并自选股和持有股条目去重
+    const watchlistEntries = this.stockManager.getAll();
+    const portfolioEntries = this.stockManager.getPortfolio();
+    const entries = [...new Map(
+      [...watchlistEntries, ...portfolioEntries].map(e => [e.code.toLowerCase(), e])
+    ).values()];
     const codes = entries.map(e => e.code);
 
     // 额外拉取内置指数代码和自定义关键词代码，用于注释装饰中的特殊关键词匹配

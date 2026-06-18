@@ -35,8 +35,10 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 
   const initialEntries = stockManager.getAll();
-  statusBarCarousel = new StatusBarCarousel(initialEntries);
-  commentDecorator = new CommentDecorator(initialEntries);
+  const portfolioEntries = stockManager.getPortfolio();
+  const allInitial = [...initialEntries, ...portfolioEntries];
+  statusBarCarousel = new StatusBarCarousel(allInitial);
+  commentDecorator = new CommentDecorator(allInitial);
   commentDecorator.activate(context);
 
   priceMonitor = new PriceMonitor(dataProvider, stockManager, context);
