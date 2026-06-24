@@ -6,7 +6,7 @@
 
 import * as https from 'https';
 import * as http from 'http';
-import { StockData, CacheEntry } from '../types';
+import { StockData, CacheEntry, KlineDay } from '../types';
 
 // ─── 接口定义 ────────────────────────────────────────────────────────────────
 
@@ -15,6 +15,7 @@ export interface IStockDataProvider {
   fetchSingle(code: string): Promise<StockData | null>;
   resolveCode(input: string): Promise<string | null>;
   resolveMarketPrefix(code: string): string;
+  fetchKline(code: string, days: number): Promise<KlineDay[]>;
 }
 
 // ─── 内存缓存 ─────────────────────────────────────────────────────────────────
@@ -112,7 +113,7 @@ function parseEastMoneyResponse(json: string, requestedCodes: string[]): StockDa
   try {
     parsed = JSON.parse(json);
   } catch (e) {
-    console.error('[StockDataProvider] 东方财富响应 JSON 解析失败:', e);
+    console.warn('[StockDataProvider] 东方财富响应 JSON 解析失败，尝试备用数据源:', (e as Error).message);
     return [];
   }
 
@@ -331,7 +332,7 @@ export class StockDataProvider implements IStockDataProvider {
 
   /**
    * 批量获取股票数据
-   * 优先使用东方财富 API，失败时回退新浪财经 API，
+   * 优先使用新浪财经 API，失败时回退东方财富 API，
    * 两者均失败时返回缓存数据。
    * @param codes 带前缀的股票代码数组，如 ["sh600036", "sz000001"]
    */
@@ -340,9 +341,9 @@ export class StockDataProvider implements IStockDataProvider {
       return [];
     }
 
-    // 1. 尝试东方财富 API
+    // 1. 尝试新浪财经 API
     try {
-      const results = await this._fetchFromEastMoney(codes);
+      const results = await this._fetchFromSina(codes);
       if (results.length > 0) {
         // 更新缓存
         for (const item of results) {
@@ -351,12 +352,12 @@ export class StockDataProvider implements IStockDataProvider {
         return results;
       }
     } catch (e) {
-      console.warn('[StockDataProvider] 东方财富 API 失败，尝试新浪备用:', e);
+      console.warn('[StockDataProvider] 新浪 API 失败，尝试东方财富备用:', e);
     }
 
-    // 2. 回退新浪财经 API
+    // 2. 回退东方财富 API
     try {
-      const results = await this._fetchFromSina(codes);
+      const results = await this._fetchFromEastMoney(codes);
       if (results.length > 0) {
         for (const item of results) {
           this.cache.set(item.code, { data: item, fetchedAt: Date.now() });
@@ -364,7 +365,7 @@ export class StockDataProvider implements IStockDataProvider {
         return results;
       }
     } catch (e) {
-      console.warn('[StockDataProvider] 新浪 API 也失败，使用缓存数据:', e);
+      console.warn('[StockDataProvider] 东方财富 API 也失败，使用缓存数据:', e);
     }
 
     // 3. 两者均失败，返回缓存
@@ -444,5 +445,35 @@ export class StockDataProvider implements IStockDataProvider {
    */
   setCache(code: string, entry: CacheEntry): void {
     this.cache.set(code, entry);
+  }
+
+  // ── 历史K线 ────────────────────────────────────────────────────────────────
+
+  /**
+   * 获取股票历史日K线数据
+   * 使用新浪财经 K线 API（免费，无需鉴权）
+   */
+  async fetchKline(code: string, days: number): Promise<KlineDay[]> {
+    const normalizedCode = this.resolveMarketPrefix(code);
+    const symbol = normalizedCode.replace(/^(sh|sz)/i, (m) => m.toLowerCase());
+
+    const url = `https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol=${symbol}&scale=240&ma=no&datalen=${days}`;
+
+    try {
+      const buf = await httpGet(url);
+      const text = decodeGBK(buf);
+      const data = JSON.parse(text);
+      if (!Array.isArray(data)) { return []; }
+      return data.map((item: any) => ({
+        date: String(item.day || ''),
+        open: Number(item.open) || 0,
+        close: Number(item.close) || 0,
+        high: Number(item.high) || 0,
+        low: Number(item.low) || 0,
+        volume: Number(item.volume) || 0,
+      }));
+    } catch {
+      return [];
+    }
   }
 }

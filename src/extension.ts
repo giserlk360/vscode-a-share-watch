@@ -36,7 +36,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const initialEntries = stockManager.getAll();
   const portfolioEntries = stockManager.getPortfolio();
-  const allInitial = [...initialEntries, ...portfolioEntries];
+  const wishlistEntries = stockManager.getWishlist();
+  const allInitial = [...initialEntries, ...portfolioEntries, ...wishlistEntries];
   statusBarCarousel = new StatusBarCarousel(allInitial);
   commentDecorator = new CommentDecorator(allInitial);
   commentDecorator.activate(context);

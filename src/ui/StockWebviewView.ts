@@ -52,7 +52,10 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
         case 'editStock':
           await this._handleEdit(msg);
           break;
-        case 'editPortfolio':
+        case 'addWishlist':
+          await this._handleAddWishlist(msg);
+          break;
+        case 'editWishlist':
           await this._handleEditPortfolio(msg);
           break;
         case 'deleteStock':
@@ -63,6 +66,15 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
           break;
         case 'exportStocks':
           await this._handleExport();
+          break;
+        case 'showKline':
+          await this._handleShowKline(msg.code, msg.days || 5);
+          break;
+        case 'saveSortOrder':
+          this._handleSaveSortOrder(msg.sortOrder);
+          break;
+        case 'saveActiveTab':
+          this._handleSaveActiveTab(msg.activeTab);
           break;
       }
     });
@@ -101,6 +113,7 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
 
     const watchlist = this.stockManager.getAll().map(mapEntry);
     const portfolio = this.stockManager.getPortfolio().map(mapEntry);
+    const wishlist = this.stockManager.getWishlist().map(mapEntry);
 
     // 收集启用的指数数据
     const customKeywords = settings.customKeywords || {};
@@ -119,7 +132,7 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
       }
     }
 
-    this._view.webview.postMessage({ type: 'stockList', watchlist, portfolio, indices });
+    this._view.webview.postMessage({ type: 'stockList', watchlist, portfolio, wishlist, indices });
   }
 
   private async _handleSearch(keyword: string): Promise<void> {
@@ -241,9 +254,48 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
     }
   }
 
-  private async _handleDelete(code: string, tab: 'watchlist' | 'portfolio'): Promise<void> {
+  private async _handleAddWishlist(msg: any): Promise<void> {
     try {
-      const entries = tab === 'portfolio' ? this.stockManager.getPortfolio() : this.stockManager.getAll();
+      const entry: StockEntry = {
+        code: msg.code,
+        name: msg.name,
+        alias: msg.alias?.trim() || undefined,
+        purchasePrice: msg.purchasePrice > 0 ? msg.purchasePrice : undefined,
+        shares: msg.shares > 0 ? msg.shares : undefined,
+        alertEnabled: !!msg.alertEnabled,
+        targetPrice: msg.targetPrice > 0 ? msg.targetPrice : undefined,
+        targetChangeRate: msg.targetChangeRate > 0 ? msg.targetChangeRate : undefined,
+        carouselEnabled: true,
+        addedAt: Date.now(),
+      };
+      await this.stockManager.addWishlist(entry);
+      this._sendStockList();
+      this._view?.webview.postMessage({ type: 'addSuccess' });
+    } catch (err) {
+      this._view?.webview.postMessage({ type: 'error', text: (err as Error).message });
+    }
+  }
+
+  private async _handleEditWishlist(msg: any): Promise<void> {
+    try {
+      await this.stockManager.updateWishlist(msg.code, {
+        alias: msg.alias?.trim() || undefined,
+        purchasePrice: msg.purchasePrice > 0 ? msg.purchasePrice : undefined,
+        shares: msg.shares > 0 ? msg.shares : undefined,
+        alertEnabled: !!msg.alertEnabled,
+        targetPrice: msg.targetPrice > 0 ? msg.targetPrice : undefined,
+        targetChangeRate: msg.targetChangeRate > 0 ? msg.targetChangeRate : undefined,
+      });
+      this._sendStockList();
+      this._view?.webview.postMessage({ type: 'editSuccess' });
+    } catch (err) {
+      this._view?.webview.postMessage({ type: 'error', text: (err as Error).message });
+    }
+  }
+
+  private async _handleDelete(code: string, tab: 'watchlist' | 'portfolio' | 'wishlist'): Promise<void> {
+    try {
+      const entries = tab === 'portfolio' ? this.stockManager.getPortfolio() : tab === 'wishlist' ? this.stockManager.getWishlist() : this.stockManager.getAll();
       const entry = entries.find(e => e.code === code);
       const name = entry?.name || code;
       const answer = await vscode.window.showWarningMessage(
@@ -254,6 +306,8 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
       if (answer !== '删除') { return; }
       if (tab === 'portfolio') {
         await this.stockManager.removePortfolio(code);
+      } else if (tab === 'wishlist') {
+        await this.stockManager.removeWishlist(code);
       } else {
         await this.stockManager.remove(code);
       }
@@ -391,6 +445,37 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
     vscode.window.showInformationMessage(`已导出 ${entries.length} 只股票到 ${uri.fsPath}`);
   }
 
+  private async _handleShowKline(code: string, days: number = 5): Promise<void> {
+    console.log('[StockWebview] showKline received:', code, 'days:', days);
+    if (!this._view) { return; }
+    try {
+      const kline = await this.dataProvider.fetchKline(code, days);
+      console.log('[StockWebview] kline data:', JSON.stringify(kline));
+      const live = this.liveDataMap.get(code);
+      const name = live?.name || this.stockManager.getByCode(code)?.name || code;
+      this._view.webview.postMessage({ type: 'klineData', data: kline, name, code, days });
+    } catch (e) {
+      console.error('[StockWebview] showKline error:', e);
+      this._view?.webview.postMessage({ type: 'error', text: '获取走势数据失败' });
+    }
+  }
+
+  private _handleSaveSortOrder(sortOrder: 'desc' | 'asc' | null): void {
+    const settings = this.priceMonitor.getSettings();
+    const display = settings.stockListDisplay || {};
+    this.priceMonitor.updateSettings({
+      stockListDisplay: { ...display, sortOrder },
+    });
+  }
+
+  private _handleSaveActiveTab(activeTab: 'watchlist' | 'wishlist' | 'portfolio'): void {
+    const settings = this.priceMonitor.getSettings();
+    const display = settings.stockListDisplay || {};
+    this.priceMonitor.updateSettings({
+      stockListDisplay: { ...display, activeTab },
+    });
+  }
+
   private _sendDisplayOptions(): void {
     if (!this._view) { return; }
     const settings = this.priceMonitor.getSettings();
@@ -485,12 +570,22 @@ body{font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-for
 .ir-skip{color:var(--vscode-descriptionForeground)}
 .ir-fail{color:var(--vscode-errorForeground)}
 .import-progress{padding:4px 0;margin-bottom:4px}
+/* 走势图 */
+#klineChart svg{width:100%;height:140px;display:block}
+.kline-line{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.kline-dot{stroke-width:2;fill:var(--vscode-sideBar-background)}
+.kline-date{fill:var(--vscode-descriptionForeground);font-size:9px;font-family:var(--vscode-font-family)}
+.kline-price{fill:var(--vscode-descriptionForeground);font-size:9px;font-family:var(--vscode-font-family)}
+.kline-info{font-size:10px;color:var(--vscode-descriptionForeground);text-align:center;margin-top:6px;line-height:1.6}
+.kline-period{padding:3px 10px;font-size:10px;opacity:.6;background:none;border:1px solid var(--vscode-widget-border);color:var(--vscode-foreground);cursor:pointer;border-radius:2px}
+.kline-period.active{opacity:1;border-color:var(--vscode-focusBorder)}
 </style>
 </head>
 <body>
 <div id="listView">
   <div class="tab-bar">
     <button class="tab-btn active" id="tabWatchlist" data-tab="watchlist">自选股</button>
+    <button class="tab-btn" id="tabWishlist" data-tab="wishlist">预购股</button>
     <button class="tab-btn" id="tabPortfolio" data-tab="portfolio">持有股</button>
   </div>
   <div class="toolbar">
@@ -570,6 +665,19 @@ body{font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-for
     <button class="btn btn-ok" id="importOkBtn">导入</button>
   </div>
 </div>
+<div id="klineView" class="form-overlay">
+  <div class="form-title" id="klineTitle">股价走势</div>
+  <div style="display:flex;gap:8px;margin-bottom:8px">
+    <button class="btn btn-ok kline-period active" id="kline5d">5日</button>
+    <button class="btn btn-ok kline-period" id="kline10d">10日</button>
+  </div>
+  <div id="klineLoading" style="text-align:center;padding:20px;color:var(--vscode-descriptionForeground);font-size:11px">加载中...</div>
+  <div id="klineChart"></div>
+  <div id="klineInfo" class="kline-info"></div>
+  <div class="form-btns">
+    <button class="btn btn-cancel" id="klineCloseBtn">关闭</button>
+  </div>
+</div>
 <script>
 const vscode = acquireVsCodeApi();
 const $ = id => document.getElementById(id);
@@ -581,6 +689,10 @@ let displayOpts = { showCode:true, showCurrentPrice:true, showChangeRate:true, s
 let activeTab = 'watchlist'; // 当前激活的 Tab
 let allWatchlistData = null;   // 缓存自选股数据
 let allPortfolioData = null;   // 缓存持有股数据
+let allWishlistData = null;   // 缓存预购股数据
+let klineDays = 5;             // 走势图天数（5 或 10）
+let klineCode = '';            // 当前走势图股票代码
+let klineName = '';            // 当前走势图股票名称
 let allIndicesData = null;   // 缓存指数数据
 let sortOrder = null;         // null=默认, 'desc'=涨幅优先, 'asc'=跌幅优先
 let formTab = 'watchlist';    // 当前表单操作的 Tab 来源
@@ -591,6 +703,7 @@ window.addEventListener('message', e => {
   if (msg.type === 'stockList') {
     allWatchlistData = msg.watchlist;
     allPortfolioData = msg.portfolio;
+    allWishlistData = msg.wishlist;
     allIndicesData = msg.indices || [];
     renderList(msg, activeTab);
   }
@@ -603,18 +716,36 @@ window.addEventListener('message', e => {
   }
   if (msg.type === 'displayOptions') applyDisplayOptions(msg.options);
   if (msg.type === 'importResult') showImportResult(msg);
+  if (msg.type === 'klineData') {
+    klineCode = msg.code;
+    klineName = msg.name;
+    klineDays = msg.days || 5;
+    showKline();
+    renderKlineChart(msg.data, msg.name, msg.code, klineDays);
+  }
 });
 
 // ── 显示设置（由插件设置面板控制） ──
 function applyDisplayOptions(opts) {
   if (!opts) return;
   displayOpts = { ...displayOpts, ...opts };
+  // 恢复排序状态
+  if (opts.sortOrder !== undefined) {
+    sortOrder = opts.sortOrder;
+    $('sortBtn').classList.toggle('sort-active', sortOrder !== null);
+    $('sortBtn').textContent = sortOrder === 'desc' ? '↓' : sortOrder === 'asc' ? '↑' : '↕';
+  }
+  // 恢复 Tab 状态
+  if (opts.activeTab) {
+    activeTab = opts.activeTab;
+    switchTab(activeTab);
+  }
 }
 
 // ── 渲染股票列表 ──
 function renderList(msg, tab) {
   tab = tab || 'watchlist';
-  const list = tab === 'portfolio' ? (msg.portfolio || []) : (msg.watchlist || []);
+  let list = tab === 'portfolio' ? (msg.portfolio || []) : tab === 'wishlist' ? (msg.wishlist || []) : (msg.watchlist || []);
   const indices = msg.indices || [];
 
   // 按涨跌幅排序
@@ -720,6 +851,8 @@ function renderList(msg, tab) {
       + (sharesHtml || profitHtml ? '<div style="display:flex;justify-content:space-between;align-items:center">' + sharesHtml + profitHtml + '</div>' : '')
       + '</div>'
       + '<div class="stock-actions">'
+      + '<button class="act-btn kline-btn" title="走势">📈</button>'
+      + '<button class="act-btn wish-btn" title="预购">☆</button>'
       + '<button class="act-btn edit-btn" title="编辑">✎</button>'
       + '<button class="act-btn del-btn" title="删除">✕</button>'
       + '</div></div>';
@@ -760,6 +893,34 @@ function renderList(msg, tab) {
       }
     });
   });
+
+  // 走势图按钮
+  container.querySelectorAll('.kline-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      const item = e.target.closest('.stock-item');
+      const code = item.dataset.code;
+      if (code) {
+        vscode.postMessage({ type: 'showKline', code });
+      }
+    });
+  });
+
+  // 预购按钮（仅在自选股 tab 显示）
+  if (activeTab === 'watchlist') {
+    container.querySelectorAll('.wish-btn').forEach(btn => {
+      btn.style.display = 'inline';
+      btn.addEventListener('click', e => {
+        const item = e.target.closest('.stock-item');
+        const code = item.dataset.code;
+        const s = list.find(x => x.code === code);
+        if (code && s) {
+          vscode.postMessage({ type: 'addWishlist', code, name: s.name });
+        }
+      });
+    });
+  } else {
+    container.querySelectorAll('.wish-btn').forEach(btn => { btn.style.display = 'none'; });
+  }
 }
 
 // ── 搜索结果渲染 ──
@@ -807,7 +968,7 @@ function showForm(stock, tab) {
 
   // 新增时隐藏别名和持仓相关字段，编辑模式始终显示全部
   const isAdd = !stock;
-  const isWatchlistAdd = isAdd && formTab === 'watchlist';
+  const isWatchlistAdd = isAdd && (formTab === 'watchlist' || formTab === 'wishlist');
   $('aliasField').style.display = isAdd ? 'none' : '';
   $('priceField').style.display = isWatchlistAdd ? 'none' : '';
   $('sharesField').style.display = isWatchlistAdd ? 'none' : '';
@@ -871,7 +1032,7 @@ $('okBtn').addEventListener('click', () => {
   $('formError').style.display = 'none';
 
   if (editCode) {
-    const editType = formTab === 'portfolio' ? 'editPortfolio' : 'editStock';
+    const editType = formTab === 'wishlist' ? 'editWishlist' : formTab === 'portfolio' ? 'editPortfolio' : 'editStock';
     vscode.postMessage({ type: editType, code: editCode, alias, purchasePrice, shares, alertEnabled, targetPrice, targetChangeRate });
   } else {
     if (!selectedResult) {
@@ -879,7 +1040,7 @@ $('okBtn').addEventListener('click', () => {
       $('formError').style.display = 'block';
       return;
     }
-    const addType = formTab === 'portfolio' ? 'addPortfolio' : 'addStock';
+    const addType = formTab === 'wishlist' ? 'addWishlist' : formTab === 'portfolio' ? 'addPortfolio' : 'addStock';
     vscode.postMessage({
       type: addType,
       code: selectedResult.code,
@@ -896,13 +1057,16 @@ function switchTab(tab) {
     btn.classList.toggle('active', btn.dataset.tab === tab);
   });
   $('importBtn').style.display = tab === 'watchlist' ? 'inline' : 'none';
-  $('toolbarTitle').textContent = tab === 'watchlist' ? '自选股' : '持有股';
+  $('toolbarTitle').textContent = tab === 'watchlist' ? '自选股' : tab === 'portfolio' ? '持有股' : '预购股';
   if (allWatchlistData !== null) {
-    renderList({ watchlist: allWatchlistData, portfolio: allPortfolioData, indices: allIndicesData }, tab);
+    renderList({ watchlist: allWatchlistData, portfolio: allPortfolioData, wishlist: allWishlistData, indices: allIndicesData }, tab);
   }
+  // 持久化 Tab 选择
+  vscode.postMessage({ type: 'saveActiveTab', activeTab: tab });
 }
 $('tabWatchlist').addEventListener('click', () => switchTab('watchlist'));
 $('tabPortfolio').addEventListener('click', () => switchTab('portfolio'));
+$('tabWishlist').addEventListener('click', () => switchTab('wishlist'));
 
 // ── 涨跌幅排序 ──
 $('sortBtn').addEventListener('click', () => {
@@ -912,6 +1076,8 @@ $('sortBtn').addEventListener('click', () => {
   if (allWatchlistData !== null) {
     renderList({ watchlist: allWatchlistData, portfolio: allPortfolioData, indices: allIndicesData }, activeTab);
   }
+  // 持久化排序选择
+  vscode.postMessage({ type: 'saveSortOrder', sortOrder });
 });
 
 // ── 导入弹窗 ──
@@ -972,6 +1138,123 @@ $('importOkBtn').addEventListener('click', () => {
 $('exportBtn').addEventListener('click', () => {
   vscode.postMessage({ type: 'exportStocks' });
 });
+
+// ── 走势图 ──
+function showKline() {
+  $('klineChart').innerHTML = '';
+  $('klineInfo').textContent = '';
+  $('klineLoading').style.display = 'block';
+  $('listView').style.display = 'none';
+  $('klineView').classList.add('active');
+  // 更新周期按钮状态
+  document.querySelectorAll('.kline-period').forEach(btn => {
+    btn.classList.toggle('active', (klineDays === 5 && btn.id === 'kline5d') || (klineDays === 10 && btn.id === 'kline10d'));
+  });
+}
+
+function hideKline() {
+  $('klineView').classList.remove('active');
+  $('listView').style.display = 'block';
+}
+
+$('klineCloseBtn').addEventListener('click', hideKline);
+
+// ── 走势周期切换 ──
+$('kline5d').addEventListener('click', () => {
+  if (klineDays === 5) return;
+  klineDays = 5;
+  document.querySelectorAll('.kline-period').forEach(btn => {
+    btn.classList.toggle('active', btn.id === 'kline5d');
+  });
+  if (klineCode) {
+    $('klineChart').innerHTML = '';
+    $('klineInfo').textContent = '';
+    $('klineLoading').style.display = 'block';
+    vscode.postMessage({ type: 'showKline', code: klineCode, days: 5 });
+  }
+});
+$('kline10d').addEventListener('click', () => {
+  if (klineDays === 10) return;
+  klineDays = 10;
+  document.querySelectorAll('.kline-period').forEach(btn => {
+    btn.classList.toggle('active', btn.id === 'kline10d');
+  });
+  if (klineCode) {
+    $('klineChart').innerHTML = '';
+    $('klineInfo').textContent = '';
+    $('klineLoading').style.display = 'block';
+    vscode.postMessage({ type: 'showKline', code: klineCode, days: 10 });
+  }
+});
+
+function renderKlineChart(data, name, code, days) {
+  $('klineLoading').style.display = 'none';
+  $('klineTitle').textContent = name + '（' + code + '） 近' + days + '日走势';
+
+  if (!data || data.length === 0) {
+    $('klineChart').innerHTML = '<div class="empty">暂无走势数据</div>';
+    return;
+  }
+
+  const closes = data.map(d => d.close);
+  const dates = data.map(d => d.date.slice(5)); // MM-DD
+  const minP = Math.min(...closes);
+  const maxP = Math.max(...closes);
+  const range = maxP - minP || 1;
+  const pad = range * 0.15;
+  const yMin = minP - pad;
+  const yMax = maxP + pad;
+  const yRange = yMax - yMin;
+
+  const W = 280, H = 140;
+  const padL = 50, padR = 10, padT = 15, padB = 24;
+  const chartW = W - padL - padR;
+  const chartH = H - padT - padB;
+
+  const toX = i => padL + (data.length === 1 ? chartW / 2 : (i / (data.length - 1)) * chartW);
+  const toY = v => padT + chartH - ((v - yMin) / yRange) * chartH;
+
+  const isUp = closes[closes.length - 1] >= closes[0];
+  const lineColor = isUp ? '#F14C4C' : '#73C991';
+
+  // 构建 SVG
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg">';
+
+  // Y轴参考线
+  const ySteps = 4;
+  for (let i = 0; i <= ySteps; i++) {
+    const yVal = yMin + (yRange / ySteps) * i;
+    const yPos = toY(yVal);
+    svg += '<line x1="' + padL + '" y1="' + yPos + '" x2="' + (W - padR) + '" y2="' + yPos + '" stroke="var(--vscode-widget-border)" stroke-width="0.5" stroke-dasharray="2,2"/>';
+    svg += '<text x="' + (padL - 4) + '" y="' + (yPos + 3) + '" text-anchor="end" class="kline-price">' + yVal.toFixed(2) + '</text>';
+  }
+
+  // 折线
+  if (data.length > 1) {
+    const points = closes.map((v, i) => toX(i) + ',' + toY(v)).join(' ');
+    svg += '<polyline points="' + points + '" class="kline-line" stroke="' + lineColor + '"/>';
+  }
+
+  // 数据点 + 日期标签
+  data.forEach((d, i) => {
+    const cx = toX(i), cy = toY(d.close);
+    svg += '<circle cx="' + cx + '" cy="' + cy + '" r="3" class="kline-dot" stroke="' + lineColor + '"/>';
+    // 收盘价标注
+    svg += '<text x="' + cx + '" y="' + (cy - 6) + '" text-anchor="middle" class="kline-price" fill="' + lineColor + '">' + d.close.toFixed(2) + '</text>';
+    // 日期
+    svg += '<text x="' + cx + '" y="' + (H - 4) + '" text-anchor="middle" class="kline-date">' + esc(dates[i]) + '</text>';
+  });
+
+  svg += '</svg>';
+  $('klineChart').innerHTML = svg;
+
+  // 涨跌信息
+  const chg = closes[closes.length - 1] - closes[0];
+  const chgPct = closes[0] !== 0 ? (chg / closes[0] * 100) : 0;
+  const cls = chg >= 0 ? 'up' : 'down';
+  const sign = chg >= 0 ? '+' : '';
+  $('klineInfo').innerHTML = '<span class="' + cls + '">' + sign + chg.toFixed(2) + '（' + sign + chgPct.toFixed(2) + '%）</span>　期间最高 ' + Math.max(...data.map(d => d.high)).toFixed(2) + '　最低 ' + Math.min(...data.map(d => d.low)).toFixed(2);
+}
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 

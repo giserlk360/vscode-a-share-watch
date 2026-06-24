@@ -223,8 +223,9 @@ export class PriceMonitor implements IPriceMonitor {
     // 合并自选股和持有股条目去重
     const watchlistEntries = this.stockManager.getAll();
     const portfolioEntries = this.stockManager.getPortfolio();
+    const wishlistEntries = this.stockManager.getWishlist();
     const entries = [...new Map(
-      [...watchlistEntries, ...portfolioEntries].map(e => [e.code.toLowerCase(), e])
+      [...watchlistEntries, ...portfolioEntries, ...wishlistEntries].map(e => [e.code.toLowerCase(), e])
     ).values()];
     const codes = entries.map(e => e.code);
 

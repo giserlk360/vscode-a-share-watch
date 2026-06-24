@@ -36,6 +36,11 @@ export interface IStockManager {
   removePortfolio(code: string): Promise<void>;
   updatePortfolio(code: string, patch: Partial<StockEntry>): Promise<void>;
   getPortfolio(): StockEntry[];
+  // 预购股 CRUD
+  addWishlist(entry: StockEntry): Promise<void>;
+  removeWishlist(code: string): Promise<void>;
+  updateWishlist(code: string, patch: Partial<StockEntry>): Promise<void>;
+  getWishlist(): StockEntry[];
 }
 
 // ─── 常量 ─────────────────────────────────────────────────────────────────────
@@ -54,6 +59,8 @@ export class StockManager implements IStockManager {
   private stocks: StockEntry[] = [];
   /** 内存中的持有股列表 */
   private portfolio: StockEntry[] = [];
+  /** 内存中的预购股列表 */
+  private wishlist: StockEntry[] = [];
 
   /** VSCode 扩展上下文，用于访问 globalState */
   private context: vscode.ExtensionContext;
@@ -67,6 +74,7 @@ export class StockManager implements IStockManager {
     // 初始化时从 globalState 加载已有数据
     this._loadFromStorage();
     this._loadPortfolioFromStorage();
+    this._loadWishlistFromStorage();
   }
 
   // ── 代码有效性验证 ────────────────────────────────────────────────────────────
@@ -358,6 +366,44 @@ export class StockManager implements IStockManager {
     return [...this.portfolio];
   }
 
+  // ── 预购股 CRUD ──────────────────────────────────────────────────────────────
+
+  async addWishlist(entry: StockEntry): Promise<void> {
+    if (!StockManager.isValidCode(entry.code)) {
+      throw new Error(`无效的股票代码：${entry.code}。代码必须是带前缀（sh/sz）的6位数字，或纯6位数字。`);
+    }
+    const normalizedCode = entry.code.toLowerCase();
+    const exists = this.wishlist.some(s => s.code.toLowerCase() === normalizedCode);
+    if (exists) {
+      throw new Error(`股票代码 ${entry.code} 已存在于预购股列表中。`);
+    }
+    this.wishlist.push({ ...entry, code: normalizedCode });
+    await this._saveWishlistToStorage();
+  }
+
+  async removeWishlist(code: string): Promise<void> {
+    const normalizedCode = code.toLowerCase();
+    const index = this.wishlist.findIndex(s => s.code.toLowerCase() === normalizedCode);
+    if (index === -1) { return; }
+    this.wishlist.splice(index, 1);
+    await this._saveWishlistToStorage();
+  }
+
+  async updateWishlist(code: string, patch: Partial<StockEntry>): Promise<void> {
+    const normalizedCode = code.toLowerCase();
+    const index = this.wishlist.findIndex(s => s.code.toLowerCase() === normalizedCode);
+    if (index === -1) {
+      throw new Error(`股票代码 ${code} 不存在于预购股列表中。`);
+    }
+    const { code: _ignoredCode, ...safePatch } = patch;
+    this.wishlist[index] = { ...this.wishlist[index], ...safePatch };
+    await this._saveWishlistToStorage();
+  }
+
+  getWishlist(): StockEntry[] {
+    return [...this.wishlist];
+  }
+
   // ── 私有方法 ──────────────────────────────────────────────────────────────────
 
   /**
@@ -415,6 +461,35 @@ export class StockManager implements IStockManager {
       await this.context.globalState.update(STORAGE_KEYS.PORTFOLIO, this.portfolio);
     } catch (e) {
       console.error('[StockManager] 持久化持有股到 globalState 失败:', e);
+      throw new Error(`持久化失败：${(e as Error).message}`);
+    }
+  }
+
+  /**
+   * 从 globalState 加载预购股数据
+   */
+  private _loadWishlistFromStorage(): void {
+    try {
+      const stored = this.context.globalState.get<StockEntry[]>(STORAGE_KEYS.WISHLIST);
+      if (Array.isArray(stored)) {
+        this.wishlist = stored;
+      } else {
+        this.wishlist = [];
+      }
+    } catch (e) {
+      console.error('[StockManager] 加载预购股数据失败，使用空列表初始化:', e);
+      this.wishlist = [];
+    }
+  }
+
+  /**
+   * 将预购股数据持久化到 globalState
+   */
+  private async _saveWishlistToStorage(): Promise<void> {
+    try {
+      await this.context.globalState.update(STORAGE_KEYS.WISHLIST, this.wishlist);
+    } catch (e) {
+      console.error('[StockManager] 持久化预购股到 globalState 失败:', e);
       throw new Error(`持久化失败：${(e as Error).message}`);
     }
   }

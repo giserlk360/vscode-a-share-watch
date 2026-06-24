@@ -111,6 +111,10 @@ export interface StockListDisplayOptions {
   showPositionChangeRate: boolean;
   /** 显示持仓金额（当前价×股数） */
   showPositionAmount: boolean;
+  /** 列表排序：null=默认, 'desc'=涨幅优先, 'asc'=跌幅优先 */
+  sortOrder: null | 'desc' | 'asc';
+  /** 当前激活的 Tab：'watchlist' | 'wishlist' | 'portfolio' */
+  activeTab: 'watchlist' | 'wishlist' | 'portfolio';
 }
 
 /**
@@ -187,6 +191,24 @@ export interface CacheEntry {
 }
 
 /**
+ * 日K线数据
+ */
+export interface KlineDay {
+  /** 日期，如 "2024-01-15" */
+  date: string;
+  /** 开盘价 */
+  open: number;
+  /** 收盘价 */
+  close: number;
+  /** 最高价 */
+  high: number;
+  /** 最低价 */
+  low: number;
+  /** 成交量 */
+  volume: number;
+}
+
+/**
  * 预警历史记录
  */
 export interface AlertHistoryEntry {
@@ -249,6 +271,8 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     showProfit: true,
     showPositionChangeRate: false,
     showPositionAmount: false,
+    sortOrder: null,
+    activeTab: 'watchlist',
   },
   customKeywords: {
     '上证指数': 'sh000001',
@@ -269,6 +293,8 @@ export const STORAGE_KEYS = {
   STOCKS: 'vscode-stock-monitor.stocks',
   /** 持有股存储键 */
   PORTFOLIO: 'vscode-stock-monitor.portfolio',
+  /** 预购股存储键 */
+  WISHLIST: 'vscode-stock-monitor.wishlist',
   /** 插件设置存储键 */
   SETTINGS: 'vscode-stock-monitor.settings',
   /** 预警历史存储键 */
