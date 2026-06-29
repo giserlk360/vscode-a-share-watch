@@ -27,7 +27,6 @@ function makeEntry(code: string, purchasePrice: number): StockEntry {
     code,
     name: `股票_${code}`,
     purchasePrice,
-    alertEnabled: false,
     carouselEnabled: false,
     addedAt: Date.now(),
   };
@@ -124,7 +123,6 @@ describe('Property 8: 盈亏计算正确性', () => {
         const entry: StockEntry = {
           code: 'sh600036',
           name: '测试股票',
-          alertEnabled: false,
           carouselEnabled: false,
           addedAt: Date.now(),
         };

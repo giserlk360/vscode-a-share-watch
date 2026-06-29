@@ -6,13 +6,39 @@
  */
 
 import * as vscode from 'vscode';
-import { StockData, StockEntry, AlertConfig, AlertHistoryEntry, STORAGE_KEYS } from '../types';
+import { StockData } from '../types';
+
+const ALERT_HISTORY_KEY = 'vscode-stock-monitor.alertHistory';
+
+/** @deprecated 整个预警功能已移除，此文件不再被引用 */
+interface _StockEntry {
+  code: string;
+  name: string;
+  alertEnabled: boolean;
+  targetPrice?: number;
+  targetChangeRate?: number;
+}
+
+/** @deprecated */
+interface AlertConfig {
+  mode: 'popup' | 'intense' | 'both';
+  popupTemplate: string;
+  intenseDuration: number;
+  flashCount?: number;
+}
+
+/** @deprecated */
+interface AlertHistoryEntry {
+  code: string;
+  triggeredAt: number;
+  price: number;
+}
 
 // ─── IAlertSystem 接口 ────────────────────────────────────────────────────────
 
 export interface IAlertSystem {
   /** 检查所有股票的预警条件，满足时触发对应通知 */
-  checkAlerts(stocks: StockData[], entries: StockEntry[]): void;
+  checkAlerts(stocks: StockData[], entries: _StockEntry[]): void;
   /** 触发高强度预警：编辑器全行绿色背景闪烁3次 */
   triggerIntenseAlert(stock: StockData): void;
   /** 触发弹窗预警：使用模板渲染后调用 showInformationMessage */
@@ -60,9 +86,9 @@ export class AlertSystem implements IAlertSystem {
    * @param stocks 当前实时股票数据列表
    * @param entries 用户配置的股票条目列表（含 targetPrice/targetChangeRate/alertEnabled）
    */
-  checkAlerts(stocks: StockData[], entries: StockEntry[]): void {
+  checkAlerts(stocks: StockData[], entries: _StockEntry[]): void {
     // 构建 code → entry 的快速查找映射
-    const entryMap = new Map<string, StockEntry>();
+    const entryMap = new Map<string, _StockEntry>();
     for (const entry of entries) {
       entryMap.set(entry.code.toLowerCase(), entry);
     }
@@ -203,7 +229,7 @@ export class AlertSystem implements IAlertSystem {
    * @param entry 用户配置的股票条目
    * @returns 是否应触发预警
    */
-  private _shouldTrigger(stock: StockData, entry: StockEntry): boolean {
+  private _shouldTrigger(stock: StockData, entry: _StockEntry): boolean {
     // 检查目标价格条件
     if (entry.targetPrice !== undefined && stock.currentPrice >= entry.targetPrice) {
       return true;
@@ -288,7 +314,7 @@ export class AlertSystem implements IAlertSystem {
   private _saveAlertHistory(stock: StockData): void {
     try {
       const history =
-        this.context.globalState.get<AlertHistoryEntry[]>(STORAGE_KEYS.ALERT_HISTORY) ?? [];
+        this.context.globalState.get<AlertHistoryEntry[]>(ALERT_HISTORY_KEY) ?? [];
 
       const newEntry: AlertHistoryEntry = {
         code: stock.code,
@@ -299,7 +325,7 @@ export class AlertSystem implements IAlertSystem {
       history.push(newEntry);
 
       // 异步持久化，不阻塞主流程
-      this.context.globalState.update(STORAGE_KEYS.ALERT_HISTORY, history).then(
+      this.context.globalState.update(ALERT_HISTORY_KEY, history).then(
         () => {},
         err => {
           console.error('[AlertSystem] 持久化预警历史失败:', err);

@@ -5,7 +5,6 @@
 import * as vscode from 'vscode';
 import { StockDataProvider } from './data/StockDataProvider';
 import { StockManager } from './data/StockManager';
-import { AlertSystem } from './business/AlertSystem';
 import { PriceMonitor } from './business/PriceMonitor';
 import { StatusBarCarousel } from './ui/StatusBarCarousel';
 import { CommentDecorator } from './ui/CommentDecorator';
@@ -15,7 +14,6 @@ import { SettingsWebviewProvider } from './ui/SettingsWebview';
 let priceMonitor: PriceMonitor | undefined;
 let statusBarCarousel: StatusBarCarousel | undefined;
 let commentDecorator: CommentDecorator | undefined;
-let alertSystem: AlertSystem | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
   console.log('[股票监控] 插件已激活');
@@ -26,13 +24,6 @@ export function activate(context: vscode.ExtensionContext): void {
   const tempMonitor = new PriceMonitor(dataProvider, stockManager, context);
   const currentSettings = tempMonitor.getSettings();
   tempMonitor.dispose();
-
-  alertSystem = new AlertSystem(context, {
-    mode: currentSettings.alertMode,
-    popupTemplate: currentSettings.popupTemplate,
-    intenseDuration: currentSettings.alertDuration,
-    flashCount: currentSettings.alertFlashCount,
-  });
 
   const initialEntries = stockManager.getAll();
   const portfolioEntries = stockManager.getPortfolio();
@@ -45,7 +36,6 @@ export function activate(context: vscode.ExtensionContext): void {
   priceMonitor = new PriceMonitor(dataProvider, stockManager, context);
   priceMonitor.registerDecorator(commentDecorator);
   priceMonitor.registerCarousel(statusBarCarousel);
-  priceMonitor.registerAlertSystem(alertSystem);
 
   // 股票列表侧边栏 Webview
   const stockWebviewView = new StockWebviewView(context, stockManager, dataProvider, priceMonitor);
@@ -100,7 +90,6 @@ export function activate(context: vscode.ExtensionContext): void {
     { dispose: () => priceMonitor?.dispose() },
     { dispose: () => statusBarCarousel?.dispose() },
     { dispose: () => commentDecorator?.dispose() },
-    { dispose: () => alertSystem?.dispose() },
   );
 
   console.log('[股票监控] 所有组件初始化完成');
@@ -110,5 +99,4 @@ export function deactivate(): void {
   priceMonitor?.dispose(); priceMonitor = undefined;
   statusBarCarousel?.dispose(); statusBarCarousel = undefined;
   commentDecorator?.dispose(); commentDecorator = undefined;
-  alertSystem?.dispose(); alertSystem = undefined;
 }

@@ -41,15 +41,6 @@ const stockEntryArb: fc.Arbitrary<StockEntry> = fc.record({
     fc.float({ min: Math.fround(0.01), max: Math.fround(9999), noNaN: true }),
     { nil: undefined }
   ),
-  targetPrice: fc.option(
-    fc.float({ min: Math.fround(0.01), max: Math.fround(9999), noNaN: true }),
-    { nil: undefined }
-  ),
-  targetChangeRate: fc.option(
-    fc.float({ min: Math.fround(-100), max: Math.fround(100), noNaN: true }),
-    { nil: undefined }
-  ),
-  alertEnabled: fc.boolean(),
   carouselEnabled: fc.boolean(),
   addedAt: fc.integer({ min: 0, max: Date.now() }),
 });
@@ -68,7 +59,6 @@ function assertStockEntryEqual(actual: StockEntry, expected: StockEntry): void {
   expect(actual.code).toBe(expected.code);
   expect(actual.name).toBe(expected.name);
   expect(actual.alias).toBe(expected.alias);
-  expect(actual.alertEnabled).toBe(expected.alertEnabled);
   expect(actual.carouselEnabled).toBe(expected.carouselEnabled);
   expect(actual.addedAt).toBe(expected.addedAt);
 
@@ -76,16 +66,6 @@ function assertStockEntryEqual(actual: StockEntry, expected: StockEntry): void {
     expect(actual.purchasePrice).toBeUndefined();
   } else {
     expect(actual.purchasePrice).toBeCloseTo(expected.purchasePrice, 5);
-  }
-  if (expected.targetPrice === undefined) {
-    expect(actual.targetPrice).toBeUndefined();
-  } else {
-    expect(actual.targetPrice).toBeCloseTo(expected.targetPrice, 5);
-  }
-  if (expected.targetChangeRate === undefined) {
-    expect(actual.targetChangeRate).toBeUndefined();
-  } else {
-    expect(actual.targetChangeRate).toBeCloseTo(expected.targetChangeRate, 5);
   }
 }
 
@@ -178,7 +158,7 @@ describe('Property 5: 导出导入往返一致性', () => {
     const missingCode = JSON.stringify({
       version: '1.0',
       exportedAt: new Date().toISOString(),
-      stocks: [{ name: '招商银行', alertEnabled: true, carouselEnabled: false, addedAt: 1000 }],
+      stocks: [{ name: '招商银行', carouselEnabled: false, addedAt: 1000 }],
     });
     await expect(manager.importJSON(missingCode)).rejects.toThrow();
 
@@ -186,23 +166,15 @@ describe('Property 5: 导出导入往返一致性', () => {
     const missingName = JSON.stringify({
       version: '1.0',
       exportedAt: new Date().toISOString(),
-      stocks: [{ code: 'sh600036', alertEnabled: true, carouselEnabled: false, addedAt: 1000 }],
+      stocks: [{ code: 'sh600036', carouselEnabled: false, addedAt: 1000 }],
     });
     await expect(manager.importJSON(missingName)).rejects.toThrow();
-
-    // 缺少 alertEnabled 字段
-    const missingAlert = JSON.stringify({
-      version: '1.0',
-      exportedAt: new Date().toISOString(),
-      stocks: [{ code: 'sh600036', name: '招商银行', carouselEnabled: false, addedAt: 1000 }],
-    });
-    await expect(manager.importJSON(missingAlert)).rejects.toThrow();
 
     // 缺少 carouselEnabled 字段
     const missingCarousel = JSON.stringify({
       version: '1.0',
       exportedAt: new Date().toISOString(),
-      stocks: [{ code: 'sh600036', name: '招商银行', alertEnabled: true, addedAt: 1000 }],
+      stocks: [{ code: 'sh600036', name: '招商银行', addedAt: 1000 }],
     });
     await expect(manager.importJSON(missingCarousel)).rejects.toThrow();
 
@@ -210,7 +182,7 @@ describe('Property 5: 导出导入往返一致性', () => {
     const missingAddedAt = JSON.stringify({
       version: '1.0',
       exportedAt: new Date().toISOString(),
-      stocks: [{ code: 'sh600036', name: '招商银行', alertEnabled: true, carouselEnabled: false }],
+      stocks: [{ code: 'sh600036', name: '招商银行', carouselEnabled: false }],
     });
     await expect(manager.importJSON(missingAddedAt)).rejects.toThrow();
   });

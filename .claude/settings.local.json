@@ -5,7 +5,8 @@
       "Bash(cp d:/project/vscode-stock-monitor-master/dist/extension.js.map /c/Users/李康/.vscode/extensions/chenyangyang.vscode-stock-monitor-0.0.4/dist/extension.js.map)",
       "Bash(cp d:/project/vscode-stock-monitor-master/dist/extension.js 'C:\\\\Users\\\\李康/.vscode/extensions/chenyangyang.vscode-stock-monitor-0.0.4/dist/extension.js')",
       "Bash(cp d:/project/vscode-stock-monitor-master/dist/extension.js.map 'C:\\\\Users\\\\李康/.vscode/extensions/chenyangyang.vscode-stock-monitor-0.0.4/dist/extension.js.map')",
-      "Bash(cp d:/project/vscode-stock-monitor-master/dist/extension.js ~/.vscode/extensions/chenyangyang.vscode-stock-monitor-0.0.4/dist/extension.js 2>&1)"
+      "Bash(cp d:/project/vscode-stock-monitor-master/dist/extension.js ~/.vscode/extensions/chenyangyang.vscode-stock-monitor-0.0.4/dist/extension.js 2>&1)",
+      "Bash(cp d:/project/vscode-stock-monitor-master/dist/extension.js ~/.vscode/extensions/chenyangyang.vscode-stock-monitor-0.0.4/dist/extension.js)"
     ],
     "additionalDirectories": [
       "C:\\Users\\李康\\.vscode\\extensions\\chenyangyang.vscode-stock-monitor-0.0.4\\dist"

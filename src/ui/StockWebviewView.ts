@@ -50,16 +50,25 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
           await this._handleAddPortfolio(msg);
           break;
         case 'editStock':
+          console.log('[StockWebview] received editStock:', JSON.stringify(msg));
           await this._handleEdit(msg);
+          break;
+        case 'editPortfolio':
+          console.log('[StockWebview] received editPortfolio:', JSON.stringify(msg));
+          await this._handleEditPortfolio(msg);
           break;
         case 'addWishlist':
           await this._handleAddWishlist(msg);
           break;
         case 'editWishlist':
-          await this._handleEditPortfolio(msg);
+          console.log('[StockWebview] received editWishlist:', JSON.stringify(msg));
+          await this._handleEditWishlist(msg);
           break;
         case 'deleteStock':
           await this._handleDelete(msg.code, msg.fromTab || 'watchlist');
+          break;
+        case 'savePlanMemo':
+          await this._handleSavePlanMemo(msg.text);
           break;
         case 'importStocks':
           await this._handleImport(msg.lines);
@@ -103,11 +112,9 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
         purchasePrice: e.purchasePrice,
         shares: e.shares,
         currentPrice: live?.currentPrice,
+        closePrice: live?.closePrice,
         changeRate: live?.changeRate,
         isETF: live?.isETF ?? false,
-        alertEnabled: e.alertEnabled,
-        targetPrice: e.targetPrice,
-        targetChangeRate: e.targetChangeRate,
       };
     };
 
@@ -132,7 +139,7 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
       }
     }
 
-    this._view.webview.postMessage({ type: 'stockList', watchlist, portfolio, wishlist, indices });
+    this._view.webview.postMessage({ type: 'stockList', watchlist, portfolio, wishlist, indices, planMemo: this.stockManager.getPlanMemo() });
   }
 
   private async _handleSearch(keyword: string): Promise<void> {
@@ -184,9 +191,6 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
         alias: msg.alias?.trim() || undefined,
         purchasePrice: msg.purchasePrice > 0 ? msg.purchasePrice : undefined,
         shares: msg.shares > 0 ? msg.shares : undefined,
-        alertEnabled: !!msg.alertEnabled,
-        targetPrice: msg.targetPrice > 0 ? msg.targetPrice : undefined,
-        targetChangeRate: msg.targetChangeRate > 0 ? msg.targetChangeRate : undefined,
         carouselEnabled: true,
         addedAt: Date.now(),
       };
@@ -204,9 +208,6 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
         alias: msg.alias?.trim() || undefined,
         purchasePrice: msg.purchasePrice > 0 ? msg.purchasePrice : undefined,
         shares: msg.shares > 0 ? msg.shares : undefined,
-        alertEnabled: !!msg.alertEnabled,
-        targetPrice: msg.targetPrice > 0 ? msg.targetPrice : undefined,
-        targetChangeRate: msg.targetChangeRate > 0 ? msg.targetChangeRate : undefined,
       });
       this._sendStockList();
       this._view?.webview.postMessage({ type: 'editSuccess' });
@@ -220,12 +221,8 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
       const entry: StockEntry = {
         code: msg.code,
         name: msg.name,
-        alias: msg.alias?.trim() || undefined,
         purchasePrice: msg.purchasePrice > 0 ? msg.purchasePrice : undefined,
         shares: msg.shares > 0 ? msg.shares : undefined,
-        alertEnabled: !!msg.alertEnabled,
-        targetPrice: msg.targetPrice > 0 ? msg.targetPrice : undefined,
-        targetChangeRate: msg.targetChangeRate > 0 ? msg.targetChangeRate : undefined,
         carouselEnabled: true,
         addedAt: Date.now(),
       };
@@ -240,12 +237,8 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
   private async _handleEditPortfolio(msg: any): Promise<void> {
     try {
       await this.stockManager.updatePortfolio(msg.code, {
-        alias: msg.alias?.trim() || undefined,
         purchasePrice: msg.purchasePrice > 0 ? msg.purchasePrice : undefined,
         shares: msg.shares > 0 ? msg.shares : undefined,
-        alertEnabled: !!msg.alertEnabled,
-        targetPrice: msg.targetPrice > 0 ? msg.targetPrice : undefined,
-        targetChangeRate: msg.targetChangeRate > 0 ? msg.targetChangeRate : undefined,
       });
       this._sendStockList();
       this._view?.webview.postMessage({ type: 'editSuccess' });
@@ -262,9 +255,6 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
         alias: msg.alias?.trim() || undefined,
         purchasePrice: msg.purchasePrice > 0 ? msg.purchasePrice : undefined,
         shares: msg.shares > 0 ? msg.shares : undefined,
-        alertEnabled: !!msg.alertEnabled,
-        targetPrice: msg.targetPrice > 0 ? msg.targetPrice : undefined,
-        targetChangeRate: msg.targetChangeRate > 0 ? msg.targetChangeRate : undefined,
         carouselEnabled: true,
         addedAt: Date.now(),
       };
@@ -279,12 +269,6 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
   private async _handleEditWishlist(msg: any): Promise<void> {
     try {
       await this.stockManager.updateWishlist(msg.code, {
-        alias: msg.alias?.trim() || undefined,
-        purchasePrice: msg.purchasePrice > 0 ? msg.purchasePrice : undefined,
-        shares: msg.shares > 0 ? msg.shares : undefined,
-        alertEnabled: !!msg.alertEnabled,
-        targetPrice: msg.targetPrice > 0 ? msg.targetPrice : undefined,
-        targetChangeRate: msg.targetChangeRate > 0 ? msg.targetChangeRate : undefined,
       });
       this._sendStockList();
       this._view?.webview.postMessage({ type: 'editSuccess' });
@@ -312,6 +296,14 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
         await this.stockManager.remove(code);
       }
       this._sendStockList();
+    } catch (err) {
+      this._view?.webview.postMessage({ type: 'error', text: (err as Error).message });
+    }
+  }
+
+  private async _handleSavePlanMemo(text: string): Promise<void> {
+    try {
+      await this.stockManager.savePlanMemo(text || '');
     } catch (err) {
       this._view?.webview.postMessage({ type: 'error', text: (err as Error).message });
     }
@@ -367,7 +359,6 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
     const entries: StockEntry[] = resolved.map(r => ({
       code: r.code,
       name: r.name,
-      alertEnabled: false,
       carouselEnabled: true,
       addedAt: Date.now(),
     }));
@@ -497,12 +488,13 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
 <meta charset="UTF-8">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-foreground);background:var(--vscode-sideBar-background);padding:0;overflow-x:hidden}
+body{font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-foreground);background:var(--vscode-sideBar-background);padding:0;overflow:hidden;height:100vh}
+#listView{display:flex;flex-direction:column;height:100vh}
 .toolbar{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid var(--vscode-widget-border)}
 .toolbar-title{font-size:11px;font-weight:600;opacity:.7}
 .toolbar-btn{background:none;border:none;color:var(--vscode-foreground);cursor:pointer;font-size:14px;padding:2px 6px;border-radius:3px;opacity:.7}
 .toolbar-btn:hover{opacity:1;background:var(--vscode-toolbar-hoverBackground)}
-.stock-list{padding:0}
+.stock-list{padding:0;flex:1;overflow-y:auto;min-height:0}
 .stock-item{display:flex;align-items:center;padding:6px 12px;border-bottom:1px solid var(--vscode-widget-border);cursor:default}
 .stock-index{background:var(--vscode-editor-background);opacity:.85}
 .stock-item:hover{background:var(--vscode-list-hoverBackground)}
@@ -548,12 +540,6 @@ body{font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-for
 .btn-ok{background:var(--vscode-button-background);color:var(--vscode-button-foreground);font-weight:600}
 .btn:hover{opacity:.85}
 .form-error{color:var(--vscode-errorForeground);font-size:11px;margin-top:6px;display:none}
-/* 预警配置 */
-.alert-section{border-top:1px solid var(--vscode-widget-border);margin-top:10px;padding-top:10px}
-.alert-check{display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;margin-bottom:8px}
-.alert-check input{cursor:pointer}
-.alert-fields{display:none;padding-left:4px}
-.alert-fields.active{display:block}
 /* Tab 栏 */
 .tab-bar{display:flex;border-bottom:1px solid var(--vscode-widget-border);background:var(--vscode-editor-background)}
 .tab-btn{flex:1;padding:6px 0;font-size:11px;font-weight:500;background:none;border:none;border-bottom:2px solid transparent;color:var(--vscode-foreground);cursor:pointer;opacity:.7;transition:opacity .15s,border-color .15s}
@@ -579,6 +565,15 @@ body{font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-for
 .kline-info{font-size:10px;color:var(--vscode-descriptionForeground);text-align:center;margin-top:6px;line-height:1.6}
 .kline-period{padding:3px 10px;font-size:10px;opacity:.6;background:none;border:1px solid var(--vscode-widget-border);color:var(--vscode-foreground);cursor:pointer;border-radius:2px}
 .kline-period.active{opacity:1;border-color:var(--vscode-focusBorder)}
+/* 明日计划备忘录 */
+.plan-memo{border-top:1px solid var(--vscode-widget-border);padding:8px 12px;background:var(--vscode-sideBar-background)}
+.plan-memo-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+.plan-memo-title{font-size:11px;font-weight:600;color:var(--vscode-foreground);opacity:.75}
+.plan-memo-save{background:var(--vscode-button-background);border:none;color:var(--vscode-button-foreground);cursor:pointer;font-size:11px;padding:2px 10px;border-radius:2px;line-height:18px;flex:0 0 auto}
+.plan-memo-save:hover{opacity:.88}
+#planMemoInput{width:100%;min-height:58px;max-height:140px;background:var(--vscode-input-background);border:1px solid var(--vscode-input-border);color:var(--vscode-input-foreground);font-size:12px;padding:6px 8px;outline:none;resize:vertical;font-family:var(--vscode-font-family);line-height:1.4}
+#planMemoInput:focus{border-color:var(--vscode-focusBorder)}
+#planMemoInput::placeholder{color:var(--vscode-input-placeholderForeground)}
 </style>
 </head>
 <body>
@@ -598,6 +593,10 @@ body{font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-for
     </div>
   </div>
   <div id="stockList" class="stock-list"></div>
+  <div id="dailyProfitBar" class="total-bar" style="display:none">
+    <span class="total-label">当日盈亏</span>
+    <span id="dailyProfitValue" class="total-value"></span>
+  </div>
   <div id="totalBar" class="total-bar" style="display:none">
     <span class="total-label">总盈亏</span>
     <span id="totalValue" class="total-value"></span>
@@ -605,6 +604,13 @@ body{font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-for
   <div id="totalAmountBar" class="total-bar" style="display:none">
     <span class="total-label">总市值</span>
     <span id="totalAmountValue" class="total-value"></span>
+  </div>
+  <div class="plan-memo">
+    <div class="plan-memo-head">
+      <div class="plan-memo-title">明日计划</div>
+      <button class="plan-memo-save" id="planMemoSaveBtn" title="保存明日计划">保存</button>
+    </div>
+    <textarea id="planMemoInput" rows="3" placeholder="手动输入明日计划，像备忘录一样记录..."></textarea>
   </div>
   <div id="emptyMsg" class="empty" style="display:none">暂无股票，点击 ＋ 添加</div>
 </div>
@@ -627,20 +633,6 @@ body{font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-for
     <label>持仓数量（可选，须为100的倍数）</label>
     <input id="sharesInput" type="number" min="0" step="100" placeholder="如: 100, 200...">
     <div class="hint">A股最小交易单位为100股（1手）</div>
-  </div>
-  <div class="alert-section" id="alertSection">
-    <label class="alert-check"><input type="checkbox" id="alertEnabledCheck"> 启用价格预警</label>
-    <div class="alert-fields" id="alertFields">
-      <div class="field">
-        <label>目标价格（可选）</label>
-        <input id="targetPriceInput" type="number" min="0" step="0.01" placeholder="当前价 ≥ 目标价时触发">
-      </div>
-      <div class="field">
-        <label>目标涨跌幅 %（可选）</label>
-        <input id="targetChangeRateInput" type="number" min="0" step="0.1" placeholder="如 5 表示涨跌幅达5%时触发">
-        <div class="hint">涨跌幅绝对值达到设定值时触发</div>
-      </div>
-    </div>
   </div>
   <div class="form-error" id="formError"></div>
   <div class="form-btns">
@@ -685,11 +677,14 @@ const $ = id => document.getElementById(id);
 let editCode = null; // 非 null 时为编辑模式
 let selectedResult = null; // 搜索选中的结果 {code, name}
 let searchTimer = null;
+let planMemoDirty = false;
+let planMemoSaving = false;
 let displayOpts = { showCode:true, showCurrentPrice:true, showChangeRate:true, showPurchasePrice:true, showShares:true, showProfit:true, showPositionChangeRate:false, showPositionAmount:false };
 let activeTab = 'watchlist'; // 当前激活的 Tab
 let allWatchlistData = null;   // 缓存自选股数据
 let allPortfolioData = null;   // 缓存持有股数据
 let allWishlistData = null;   // 缓存预购股数据
+let planMemoText = '';        // 缓存明日计划备忘录
 let klineDays = 5;             // 走势图天数（5 或 10）
 let klineCode = '';            // 当前走势图股票代码
 let klineName = '';            // 当前走势图股票名称
@@ -704,11 +699,15 @@ window.addEventListener('message', e => {
     allWatchlistData = msg.watchlist;
     allPortfolioData = msg.portfolio;
     allWishlistData = msg.wishlist;
+    planMemoText = msg.planMemo || '';
+    if (!planMemoDirty && !planMemoSaving && $('planMemoInput').value !== planMemoText) {
+      $('planMemoInput').value = planMemoText;
+    }
     allIndicesData = msg.indices || [];
     renderList(msg, activeTab);
   }
   if (msg.type === 'searchResult') renderSearchResults(msg.results);
-  if (msg.type === 'addSuccess' || msg.type === 'editSuccess') showList();
+  if (msg.type === 'addSuccess' || msg.type === 'editSuccess') { showList(); }
   if (msg.type === 'error') {
     const errDiv = $('importView').classList.contains('active') ? $('importError') : $('formError');
     errDiv.textContent = msg.text;
@@ -737,8 +736,9 @@ function applyDisplayOptions(opts) {
   }
   // 恢复 Tab 状态
   if (opts.activeTab) {
-    activeTab = opts.activeTab;
-    switchTab(activeTab);
+    const savedTab = ['watchlist', 'wishlist', 'portfolio'].includes(opts.activeTab) ? opts.activeTab : 'watchlist';
+    activeTab = savedTab;
+    switchTab(savedTab);
   }
 }
 
@@ -758,11 +758,14 @@ function renderList(msg, tab) {
   }
   const container = $('stockList');
   const empty = $('emptyMsg');
+  const dailyProfitBar = $('dailyProfitBar');
   const totalBar = $('totalBar');
   const totalAmountBar = $('totalAmountBar');
   if ((!list || list.length === 0) && indices.length === 0) {
     container.innerHTML = '';
+    empty.textContent = '暂无股票';
     empty.style.display = 'block';
+    dailyProfitBar.style.display = 'none';
     totalBar.style.display = 'none';
     totalAmountBar.style.display = 'none';
     return;
@@ -793,6 +796,7 @@ function renderList(msg, tab) {
 
   let totalProfit = 0;
   let totalAmount = 0;
+  let totalDailyProfit = 0;
   let hasAnyPosition = false;
 
   const stockHtml = list.map(s => {
@@ -819,6 +823,10 @@ function renderList(msg, tab) {
         const singleProfit = (s.currentPrice - s.purchasePrice) * s.shares;
         totalProfit += singleProfit;
         hasAnyPosition = true;
+        // 当日盈亏
+        if (s.closePrice && s.closePrice > 0) {
+          totalDailyProfit += (s.currentPrice - s.closePrice) * s.shares;
+        }
         if (displayOpts.showProfit) {
           const profitCls = singleProfit >= 0 ? 'up' : 'down';
           const profitSign = singleProfit >= 0 ? '+' : '-';
@@ -844,6 +852,18 @@ function renderList(msg, tab) {
     if (displayOpts.showChangeRate && hasLive) priceParts += ' <span class="stock-change ' + cls + '">' + rateStr + '</span>';
     if (displayOpts.showPurchasePrice && purchaseStr) priceParts += ' <span class="stock-purchase">' + purchaseStr + '</span>';
 
+    // 按钮配置：自选股=走势+预购+删除，预购股=走势+删除，持有股=走势+编辑+删除
+    const actionBtns = activeTab === 'portfolio'
+      ? '<button class="act-btn kline-btn" title="走势">📈</button>'
+        + '<button class="act-btn edit-btn" title="编辑">✎</button>'
+        + '<button class="act-btn del-btn" title="删除">✕</button>'
+      : activeTab === 'wishlist'
+        ? '<button class="act-btn kline-btn" title="走势">📈</button>'
+          + '<button class="act-btn del-btn" title="删除">✕</button>'
+        : '<button class="act-btn kline-btn" title="走势">📈</button>'
+          + '<button class="act-btn wish-btn" title="预购">☆</button>'
+          + '<button class="act-btn del-btn" title="删除">✕</button>';
+
     return '<div class="stock-item" data-code="' + esc(s.code) + '">'
       + '<div class="stock-info">'
       + '<div><span class="stock-name">' + esc(s.name) + '</span>' + aliasStr + '</div>'
@@ -851,17 +871,19 @@ function renderList(msg, tab) {
       + (sharesHtml || profitHtml ? '<div style="display:flex;justify-content:space-between;align-items:center">' + sharesHtml + profitHtml + '</div>' : '')
       + '</div>'
       + '<div class="stock-actions">'
-      + '<button class="act-btn kline-btn" title="走势">📈</button>'
-      + '<button class="act-btn wish-btn" title="预购">☆</button>'
-      + '<button class="act-btn edit-btn" title="编辑">✎</button>'
-      + '<button class="act-btn del-btn" title="删除">✕</button>'
+      + actionBtns
       + '</div></div>';
   }).join('');
 
   container.innerHTML = indexHtml + stockHtml;
 
-  // 总盈亏 & 总市值
+  // 当日盈亏 & 总盈亏 & 总市值
   if (hasAnyPosition) {
+    dailyProfitBar.style.display = 'flex';
+    const dCls = totalDailyProfit >= 0 ? 'up' : 'down';
+    const dSign = totalDailyProfit >= 0 ? '+' : '-';
+    $('dailyProfitValue').className = 'total-value ' + dCls;
+    $('dailyProfitValue').textContent = dSign + Math.abs(totalDailyProfit).toFixed(2);
     totalBar.style.display = 'flex';
     const tCls = totalProfit >= 0 ? 'up' : 'down';
     const tSign = totalProfit >= 0 ? '+' : '-';
@@ -870,6 +892,7 @@ function renderList(msg, tab) {
     totalAmountBar.style.display = 'flex';
     $('totalAmountValue').textContent = totalAmount.toFixed(2);
   } else {
+    dailyProfitBar.style.display = 'none';
     totalBar.style.display = 'none';
     totalAmountBar.style.display = 'none';
   }
@@ -905,22 +928,17 @@ function renderList(msg, tab) {
     });
   });
 
-  // 预购按钮（仅在自选股 tab 显示）
-  if (activeTab === 'watchlist') {
-    container.querySelectorAll('.wish-btn').forEach(btn => {
-      btn.style.display = 'inline';
-      btn.addEventListener('click', e => {
-        const item = e.target.closest('.stock-item');
-        const code = item.dataset.code;
-        const s = list.find(x => x.code === code);
-        if (code && s) {
-          vscode.postMessage({ type: 'addWishlist', code, name: s.name });
-        }
-      });
+  // 预购按钮事件（仅在自选股 tab 渲染了预购按钮）
+  container.querySelectorAll('.wish-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      const item = e.target.closest('.stock-item');
+      const code = item.dataset.code;
+      const s = list.find(x => x.code === code);
+      if (code && s) {
+        vscode.postMessage({ type: 'addWishlist', code, name: s.name });
+      }
     });
-  } else {
-    container.querySelectorAll('.wish-btn').forEach(btn => { btn.style.display = 'none'; });
-  }
+  });
 }
 
 // ── 搜索结果渲染 ──
@@ -957,11 +975,6 @@ function showForm(stock, tab) {
   $('aliasInput').value = stock ? (stock.alias || '') : '';
   $('priceInput').value = stock?.purchasePrice ?? '';
   $('sharesInput').value = stock?.shares ?? '';
-  const hasAlert = stock ? stock.alertEnabled : false;
-  $('alertEnabledCheck').checked = hasAlert;
-  $('alertFields').classList.toggle('active', hasAlert);
-  $('targetPriceInput').value = stock?.targetPrice ?? '';
-  $('targetChangeRateInput').value = stock?.targetChangeRate ?? '';
   $('formError').style.display = 'none';
   $('searchResults').classList.remove('active');
   selectedResult = null;
@@ -969,10 +982,11 @@ function showForm(stock, tab) {
   // 新增时隐藏别名和持仓相关字段，编辑模式始终显示全部
   const isAdd = !stock;
   const isWatchlistAdd = isAdd && (formTab === 'watchlist' || formTab === 'wishlist');
-  $('aliasField').style.display = isAdd ? 'none' : '';
+  // 自选股/预购股新增时不显示别名；持有股编辑/新增都不显示别名
+  const hideAlias = isAdd || formTab === 'portfolio';
+  $('aliasField').style.display = hideAlias ? 'none' : '';
   $('priceField').style.display = isWatchlistAdd ? 'none' : '';
   $('sharesField').style.display = isWatchlistAdd ? 'none' : '';
-  $('alertSection').style.display = isWatchlistAdd ? 'none' : '';
 
   $('listView').style.display = 'none';
   $('formView').classList.add('active');
@@ -981,7 +995,7 @@ function showForm(stock, tab) {
 
 function showList() {
   $('formView').classList.remove('active');
-  $('listView').style.display = 'block';
+  $('listView').style.display = '';
   editCode = null;
   selectedResult = null;
 }
@@ -1003,9 +1017,22 @@ $('codeInput').addEventListener('input', e => {
   }, 300);
 });
 
-// ── 预警开关切换 ──
-$('alertEnabledCheck').addEventListener('change', e => {
-  $('alertFields').classList.toggle('active', e.target.checked);
+$('planMemoInput').addEventListener('input', e => {
+  planMemoText = e.target.value;
+  planMemoDirty = true;
+  $('planMemoSaveBtn').textContent = '保存';
+});
+
+$('planMemoSaveBtn').addEventListener('click', () => {
+  planMemoText = $('planMemoInput').value;
+  planMemoDirty = false;
+  planMemoSaving = true;
+  $('planMemoSaveBtn').textContent = '已保存';
+  vscode.postMessage({ type: 'savePlanMemo', text: planMemoText });
+  setTimeout(() => {
+    planMemoSaving = false;
+    $('planMemoSaveBtn').textContent = '保存';
+  }, 1200);
 });
 
 // 点击外部关闭搜索结果
@@ -1016,14 +1043,15 @@ document.addEventListener('click', e => {
 });
 
 $('okBtn').addEventListener('click', () => {
+  console.log('[okBtn click] editCode:', editCode, 'formTab:', formTab);
   const alias = $('aliasInput').value.trim();
   const purchasePrice = parseFloat($('priceInput').value) || 0;
   const shares = parseInt($('sharesInput').value) || 0;
-  const alertEnabled = $('alertEnabledCheck').checked;
-  const targetPrice = parseFloat($('targetPriceInput').value) || 0;
-  const targetChangeRate = parseFloat($('targetChangeRateInput').value) || 0;
+
+  console.log('[okBtn click] values:', { purchasePrice, shares });
 
   if (shares > 0 && shares % 100 !== 0) {
+    console.log('[okBtn click] blocked: shares not multiple of 100, shares=', shares);
     $('formError').textContent = '持仓数量须为100的倍数';
     $('formError').style.display = 'block';
     return;
@@ -1033,7 +1061,8 @@ $('okBtn').addEventListener('click', () => {
 
   if (editCode) {
     const editType = formTab === 'wishlist' ? 'editWishlist' : formTab === 'portfolio' ? 'editPortfolio' : 'editStock';
-    vscode.postMessage({ type: editType, code: editCode, alias, purchasePrice, shares, alertEnabled, targetPrice, targetChangeRate });
+    console.log('[okBtn click] sending edit:', editType, { code: editCode, purchasePrice, shares });
+    vscode.postMessage({ type: editType, code: editCode, alias, purchasePrice, shares });
   } else {
     if (!selectedResult) {
       $('formError').textContent = '请先搜索并选择一只股票';
@@ -1045,7 +1074,7 @@ $('okBtn').addEventListener('click', () => {
       type: addType,
       code: selectedResult.code,
       name: selectedResult.name,
-      alias, purchasePrice, shares, alertEnabled, targetPrice, targetChangeRate,
+      alias, purchasePrice, shares,
     });
   }
 });
@@ -1057,6 +1086,9 @@ function switchTab(tab) {
     btn.classList.toggle('active', btn.dataset.tab === tab);
   });
   $('importBtn').style.display = tab === 'watchlist' ? 'inline' : 'none';
+  $('exportBtn').style.display = 'inline';
+  $('sortBtn').style.display = 'inline';
+  $('addBtn').style.display = 'inline';
   $('toolbarTitle').textContent = tab === 'watchlist' ? '自选股' : tab === 'portfolio' ? '持有股' : '预购股';
   if (allWatchlistData !== null) {
     renderList({ watchlist: allWatchlistData, portfolio: allPortfolioData, wishlist: allWishlistData, indices: allIndicesData }, tab);
@@ -1074,7 +1106,7 @@ $('sortBtn').addEventListener('click', () => {
   $('sortBtn').classList.toggle('sort-active', sortOrder !== null);
   $('sortBtn').textContent = sortOrder === 'desc' ? '↓' : sortOrder === 'asc' ? '↑' : '↕';
   if (allWatchlistData !== null) {
-    renderList({ watchlist: allWatchlistData, portfolio: allPortfolioData, indices: allIndicesData }, activeTab);
+    renderList({ watchlist: allWatchlistData, portfolio: allPortfolioData, wishlist: allWishlistData, indices: allIndicesData }, activeTab);
   }
   // 持久化排序选择
   vscode.postMessage({ type: 'saveSortOrder', sortOrder });
@@ -1095,7 +1127,7 @@ function showImport() {
 
 function hideImport() {
   $('importView').classList.remove('active');
-  $('listView').style.display = 'block';
+  $('listView').style.display = '';
 }
 
 function showImportResult(msg) {
@@ -1154,7 +1186,7 @@ function showKline() {
 
 function hideKline() {
   $('klineView').classList.remove('active');
-  $('listView').style.display = 'block';
+  $('listView').style.display = '';
 }
 
 $('klineCloseBtn').addEventListener('click', hideKline);

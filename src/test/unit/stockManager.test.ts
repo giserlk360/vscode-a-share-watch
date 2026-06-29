@@ -4,7 +4,7 @@
  */
 
 import { StockManager } from '../../data/StockManager';
-import { StockEntry } from '../../types';
+import { StockEntry, STORAGE_KEYS } from '../../types';
 import { MockExtensionContext } from '../__mocks__/vscode';
 
 // ─── 辅助工厂 ─────────────────────────────────────────────────────────────────
@@ -13,7 +13,6 @@ function makeEntry(overrides: Partial<StockEntry> = {}): StockEntry {
   return {
     code: 'sh600036',
     name: '招商银行',
-    alertEnabled: false,
     carouselEnabled: true,
     addedAt: Date.now(),
     ...overrides,
@@ -182,7 +181,7 @@ describe('importJSON 格式错误', () => {
       version: '1.0',
       exportedAt: new Date().toISOString(),
       stocks: [
-        { code: 'invalid', name: '测试', alertEnabled: false, carouselEnabled: true, addedAt: Date.now() },
+        { code: 'invalid', name: '测试', carouselEnabled: true, addedAt: Date.now() },
       ],
     });
     await expect(mgr.importJSON(bad)).rejects.toThrow();
@@ -194,7 +193,7 @@ describe('importJSON 格式错误', () => {
       version: '1.0',
       exportedAt: new Date().toISOString(),
       stocks: [
-        { code: 'sh600036' }, // 缺少 name、alertEnabled 等
+        { code: 'sh600036' }, // 缺少 name 等
       ],
     });
     await expect(mgr.importJSON(bad)).rejects.toThrow();
@@ -294,5 +293,23 @@ describe('remove 幂等', () => {
     await mgr.add(makeEntry({ code: 'sh600036', name: '招商银行' }));
     await mgr.remove('sh600036');
     expect(mgr.getAll()).toHaveLength(0);
+  });
+});
+
+describe('tomorrow plan memo', () => {
+  test('savePlanMemo persists plain text', async () => {
+    const mgr = makeManager();
+
+    await mgr.savePlanMemo('明天观察招商银行\n低开再看');
+
+    expect(mgr.getPlanMemo()).toBe('明天观察招商银行\n低开再看');
+  });
+
+  test('loads existing memo from storage', async () => {
+    const ctx = new MockExtensionContext() as any;
+    await ctx.globalState.update(STORAGE_KEYS.PLAN, '已有计划');
+
+    const mgr = new StockManager(ctx);
+    expect(mgr.getPlanMemo()).toBe('已有计划');
   });
 });

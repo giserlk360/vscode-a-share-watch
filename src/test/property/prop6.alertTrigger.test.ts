@@ -19,7 +19,26 @@ import * as fc from 'fast-check';
 import { AlertSystem } from '../../business/AlertSystem';
 import { MockExtensionContext } from '../__mocks__/vscode';
 import { window as mockWindow } from '../__mocks__/vscode';
-import { StockData, StockEntry, AlertConfig } from '../../types';
+import { StockData } from '../../types';
+
+// ─── 本地类型定义（原 AlertConfig、StockEntry 中的 alert 相关字段已从 types.ts 移除） ──
+
+interface AlertConfig {
+  mode: 'popup' | 'intense' | 'both';
+  popupTemplate: string;
+  intenseDuration: number;
+  flashCount?: number;
+}
+
+interface TestStockEntry {
+  code: string;
+  name: string;
+  alertEnabled: boolean;
+  targetPrice?: number;
+  targetChangeRate?: number;
+  carouselEnabled: boolean;
+  addedAt: number;
+}
 
 // ─── 辅助生成器 ───────────────────────────────────────────────────────────────
 
@@ -65,7 +84,7 @@ function makeStockEntry(
   targetPrice: number | undefined,
   targetChangeRate: number | undefined,
   alertEnabled = true,
-): StockEntry {
+): TestStockEntry {
   return {
     code: 'sh600036',
     name: '招商银行',

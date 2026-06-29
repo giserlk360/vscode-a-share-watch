@@ -34,14 +34,6 @@ export interface IStatusBarCarousel {
   updateSettings?(settings: import('../types').PluginSettings): void;
 }
 
-/**
- * AlertSystem 的最小接口
- */
-export interface IAlertSystem {
-  /** 检查预警条件，满足时触发通知 */
-  checkAlerts(stocks: StockData[], entries: import('../types').StockEntry[]): void;
-}
-
 // ─── IPriceMonitor 接口 ───────────────────────────────────────────────────────
 
 export interface IPriceMonitor {
@@ -74,9 +66,6 @@ export class PriceMonitor implements IPriceMonitor {
   /** 已注册的状态栏轮播（可选，延迟注入） */
   private statusBarCarousel: IStatusBarCarousel | null = null;
 
-  /** 已注册的预警系统（可选，延迟注入） */
-  private alertSystem: IAlertSystem | null = null;
-
   /**
    * 构造函数
    * @param dataProvider 股票数据提供者（负责 API 请求）
@@ -106,13 +95,6 @@ export class PriceMonitor implements IPriceMonitor {
    */
   registerCarousel(carousel: IStatusBarCarousel): void {
     this.statusBarCarousel = carousel;
-  }
-
-  /**
-   * 注册预警系统
-   */
-  registerAlertSystem(alertSystem: IAlertSystem): void {
-    this.alertSystem = alertSystem;
   }
 
   // ── IPriceMonitor 实现 ────────────────────────────────────────────────────────
@@ -207,7 +189,6 @@ export class PriceMonitor implements IPriceMonitor {
     this.stop();
     this.decorators = [];
     this.statusBarCarousel = null;
-    this.alertSystem = null;
     console.log('[PriceMonitor] 已释放资源');
   }
 
@@ -285,14 +266,6 @@ export class PriceMonitor implements IPriceMonitor {
       }
     }
 
-    // 分发给预警系统（同时传入 entries，用于获取 targetPrice/targetChangeRate/alertEnabled）
-    if (this.alertSystem !== null) {
-      try {
-        this.alertSystem.checkAlerts(stocks, entries);
-      } catch (err) {
-        console.error('[PriceMonitor] AlertSystem.checkAlerts 失败:', err);
-      }
-    }
   }
 
   /**

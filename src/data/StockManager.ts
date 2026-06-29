@@ -41,6 +41,9 @@ export interface IStockManager {
   removeWishlist(code: string): Promise<void>;
   updateWishlist(code: string, patch: Partial<StockEntry>): Promise<void>;
   getWishlist(): StockEntry[];
+  // 明日计划备忘录
+  getPlanMemo(): string;
+  savePlanMemo(text: string): Promise<void>;
 }
 
 // ─── 常量 ─────────────────────────────────────────────────────────────────────
@@ -61,6 +64,8 @@ export class StockManager implements IStockManager {
   private portfolio: StockEntry[] = [];
   /** 内存中的预购股列表 */
   private wishlist: StockEntry[] = [];
+  /** 内存中的明日计划备忘录 */
+  private planMemo: string = '';
 
   /** VSCode 扩展上下文，用于访问 globalState */
   private context: vscode.ExtensionContext;
@@ -75,6 +80,7 @@ export class StockManager implements IStockManager {
     this._loadFromStorage();
     this._loadPortfolioFromStorage();
     this._loadWishlistFromStorage();
+    this._loadPlanFromStorage();
   }
 
   // ── 代码有效性验证 ────────────────────────────────────────────────────────────
@@ -295,11 +301,10 @@ export class StockManager implements IStockManager {
       }
 
       // 添加到内存列表（默认值 + entry 可选字段，code/名称/内部字段始终用标准值）
-      const { code: _c, name: _n, alertEnabled: _a, carouselEnabled: _ca, addedAt: _at, ...safeEntry } = entry;
+      const { code: _c, name: _n, carouselEnabled: _ca, addedAt: _at, ...safeEntry } = entry;
       this.stocks.push({
         code: normalizedCode,
         name: entry.name || entry.code,
-        alertEnabled: false,
         carouselEnabled: true,
         addedAt: Date.now(),
         ...safeEntry,
@@ -404,6 +409,17 @@ export class StockManager implements IStockManager {
     return [...this.wishlist];
   }
 
+  // ── 明日计划备忘录 ──────────────────────────────────────────────────────────
+
+  getPlanMemo(): string {
+    return this.planMemo;
+  }
+
+  async savePlanMemo(text: string): Promise<void> {
+    this.planMemo = typeof text === 'string' ? text : '';
+    await this._savePlanToStorage();
+  }
+
   // ── 私有方法 ──────────────────────────────────────────────────────────────────
 
   /**
@@ -495,6 +511,48 @@ export class StockManager implements IStockManager {
   }
 
   /**
+   * 从 globalState 加载明日计划数据
+   */
+  private _loadPlanFromStorage(): void {
+    try {
+      const stored = this.context.globalState.get<unknown>(STORAGE_KEYS.PLAN);
+      if (typeof stored === 'string') {
+        this.planMemo = stored;
+      } else if (Array.isArray(stored)) {
+        this.planMemo = stored
+          .map((item: any) => {
+            const action = item?.action === 'sell' ? '卖出' : '买入';
+            const name = item?.name || item?.code || '';
+            const parts = [`${action} ${name}`.trim()];
+            if (item?.targetPrice) { parts.push(`目标价 ${item.targetPrice}`); }
+            if (item?.quantity) { parts.push(`数量 ${item.quantity}`); }
+            if (item?.note) { parts.push(String(item.note)); }
+            return parts.filter(Boolean).join('，');
+          })
+          .filter(Boolean)
+          .join('\n');
+      } else {
+        this.planMemo = '';
+      }
+    } catch (e) {
+      console.error('[StockManager] 加载明日计划数据失败，使用空列表初始化:', e);
+      this.planMemo = '';
+    }
+  }
+
+  /**
+   * 将明日计划数据持久化到 globalState
+   */
+  private async _savePlanToStorage(): Promise<void> {
+    try {
+      await this.context.globalState.update(STORAGE_KEYS.PLAN, this.planMemo);
+    } catch (e) {
+      console.error('[StockManager] 持久化明日计划到 globalState 失败:', e);
+      throw new Error(`持久化失败：${(e as Error).message}`);
+    }
+  }
+
+  /**
    * 验证单个股票条目的格式
    * @param item 待验证的对象
    * @param index 在数组中的索引（用于错误提示）
@@ -520,11 +578,6 @@ export class StockManager implements IStockManager {
       return '缺少 name 字段或不是字符串。';
     }
 
-    // 验证必填字段 alertEnabled
-    if (typeof entry.alertEnabled !== 'boolean') {
-      return '缺少 alertEnabled 字段或不是布尔值。';
-    }
-
     // 验证必填字段 carouselEnabled
     if (typeof entry.carouselEnabled !== 'boolean') {
       return '缺少 carouselEnabled 字段或不是布尔值。';
@@ -541,12 +594,6 @@ export class StockManager implements IStockManager {
     }
     if (entry.purchasePrice !== undefined && typeof entry.purchasePrice !== 'number') {
       return 'purchasePrice 字段必须是数字。';
-    }
-    if (entry.targetPrice !== undefined && typeof entry.targetPrice !== 'number') {
-      return 'targetPrice 字段必须是数字。';
-    }
-    if (entry.targetChangeRate !== undefined && typeof entry.targetChangeRate !== 'number') {
-      return 'targetChangeRate 字段必须是数字。';
     }
 
     return null;

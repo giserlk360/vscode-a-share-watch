@@ -29,7 +29,6 @@ function makeEntry(overrides: Partial<StockEntry> = {}): StockEntry {
   return {
     code: 'sh600036',
     name: '招商银行',
-    alertEnabled: false,
     carouselEnabled: true,
     addedAt: Date.now(),
     ...overrides,

@@ -37,9 +37,6 @@ const stockEntryArb: fc.Arbitrary<StockEntry> = fc.record({
   name: fc.string({ minLength: 1, maxLength: 20 }),
   alias: fc.option(fc.string({ minLength: 1, maxLength: 20 }), { nil: undefined }),
   purchasePrice: fc.option(fc.float({ min: Math.fround(0.01), max: Math.fround(9999), noNaN: true }), { nil: undefined }),
-  targetPrice: fc.option(fc.float({ min: Math.fround(0.01), max: Math.fround(9999), noNaN: true }), { nil: undefined }),
-  targetChangeRate: fc.option(fc.float({ min: Math.fround(-100), max: Math.fround(100), noNaN: true }), { nil: undefined }),
-  alertEnabled: fc.boolean(),
   carouselEnabled: fc.boolean(),
   addedAt: fc.integer({ min: 0, max: Date.now() }),
 });
@@ -79,7 +76,6 @@ describe('Property 4: 配置持久化往返一致性', () => {
         expect(stored.code).toBe(entry.code);
         expect(stored.name).toBe(entry.name);
         expect(stored.alias).toBe(entry.alias);
-        expect(stored.alertEnabled).toBe(entry.alertEnabled);
         expect(stored.carouselEnabled).toBe(entry.carouselEnabled);
         expect(stored.addedAt).toBe(entry.addedAt);
 
@@ -88,16 +84,6 @@ describe('Property 4: 配置持久化往返一致性', () => {
           expect(stored.purchasePrice).toBeUndefined();
         } else {
           expect(stored.purchasePrice).toBeCloseTo(entry.purchasePrice, 5);
-        }
-        if (entry.targetPrice === undefined) {
-          expect(stored.targetPrice).toBeUndefined();
-        } else {
-          expect(stored.targetPrice).toBeCloseTo(entry.targetPrice, 5);
-        }
-        if (entry.targetChangeRate === undefined) {
-          expect(stored.targetChangeRate).toBeUndefined();
-        } else {
-          expect(stored.targetChangeRate).toBeCloseTo(entry.targetChangeRate, 5);
         }
       }),
       { numRuns: 100 }
@@ -132,7 +118,6 @@ describe('Property 4: 配置持久化往返一致性', () => {
           expect(s.code).toBe(original.code);
           expect(s.name).toBe(original.name);
           expect(s.alias).toBe(original.alias);
-          expect(s.alertEnabled).toBe(original.alertEnabled);
           expect(s.carouselEnabled).toBe(original.carouselEnabled);
           expect(s.addedAt).toBe(original.addedAt);
 
@@ -140,16 +125,6 @@ describe('Property 4: 配置持久化往返一致性', () => {
             expect(s.purchasePrice).toBeUndefined();
           } else {
             expect(s.purchasePrice).toBeCloseTo(original.purchasePrice, 5);
-          }
-          if (original.targetPrice === undefined) {
-            expect(s.targetPrice).toBeUndefined();
-          } else {
-            expect(s.targetPrice).toBeCloseTo(original.targetPrice, 5);
-          }
-          if (original.targetChangeRate === undefined) {
-            expect(s.targetChangeRate).toBeUndefined();
-          } else {
-            expect(s.targetChangeRate).toBeCloseTo(original.targetChangeRate, 5);
           }
         }
       }),

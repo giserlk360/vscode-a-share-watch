@@ -15,9 +15,6 @@ export interface AddStockResult {
   alias?: string;
   purchasePrice?: number;
   shares?: number;
-  alertEnabled?: boolean;
-  targetPrice?: number;
-  targetChangeRate?: number;
 }
 
 export class AddStockWebview {
@@ -58,7 +55,7 @@ export class AddStockWebview {
       }
 
       if (msg.type === 'submit') {
-        const { codeOrName, alias, purchasePrice, shares, alertEnabled, targetPrice, targetChangeRate } = msg;
+        const { codeOrName, alias, purchasePrice, shares } = msg;
 
         try {
           let resolvedCode: string;
@@ -94,9 +91,6 @@ export class AddStockWebview {
               alias: alias?.trim() || undefined,
               purchasePrice: purchasePrice > 0 ? purchasePrice : undefined,
               shares: shares > 0 ? shares : undefined,
-              alertEnabled: !!alertEnabled,
-              targetPrice: targetPrice > 0 ? targetPrice : undefined,
-              targetChangeRate: targetChangeRate > 0 ? targetChangeRate : undefined,
             });
             vscode.window.showInformationMessage(`✅ 已更新：${resolvedName}`);
           } else {
@@ -106,9 +100,6 @@ export class AddStockWebview {
               alias: alias?.trim() || undefined,
               purchasePrice: purchasePrice > 0 ? purchasePrice : undefined,
               shares: shares > 0 ? shares : undefined,
-              alertEnabled: !!alertEnabled,
-              targetPrice: targetPrice > 0 ? targetPrice : undefined,
-              targetChangeRate: targetChangeRate > 0 ? targetChangeRate : undefined,
               carouselEnabled: true,
               addedAt: Date.now(),
             };
@@ -135,9 +126,6 @@ export class AddStockWebview {
     const aliasVal = isEdit ? (editEntry!.alias ?? '') : '';
     const priceVal = isEdit ? (editEntry!.purchasePrice ?? '') : '';
     const sharesVal = isEdit ? (editEntry!.shares ?? '') : '';
-    const alertChecked = isEdit ? editEntry!.alertEnabled : false;
-    const targetPriceVal = isEdit ? (editEntry!.targetPrice ?? '') : '';
-    const targetChangeRateVal = isEdit ? (editEntry!.targetChangeRate ?? '') : '';
 
     return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -161,11 +149,6 @@ h2{font-size:14px;font-weight:600;margin-bottom:20px;color:var(--vscode-foregrou
 .btn:hover{opacity:.85}
 .error{color:var(--vscode-errorForeground);font-size:11px;margin-top:8px;display:none}
 .loading{color:var(--vscode-descriptionForeground);font-size:11px;margin-top:8px;display:none}
-.alert-section{border-top:1px solid var(--vscode-widget-border);margin-top:14px;padding-top:14px}
-.alert-check{display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;margin-bottom:10px}
-.alert-check input{cursor:pointer}
-.alert-fields{display:none;padding-left:4px}
-.alert-fields.active{display:block}
 </style>
 </head>
 <body>
@@ -189,20 +172,6 @@ h2{font-size:14px;font-weight:600;margin-bottom:20px;color:var(--vscode-foregrou
     <input id="shares" type="number" min="0" step="100" placeholder="如: 100, 200, 500..." value="${sharesVal}">
     <div class="hint">A股最小交易单位为100股（1手）</div>
   </div>
-  <div class="alert-section">
-    <label class="alert-check"><input type="checkbox" id="alertEnabledCheck" ${alertChecked ? 'checked' : ''}> 启用价格预警</label>
-    <div class="alert-fields ${alertChecked ? 'active' : ''}" id="alertFields">
-      <div class="field">
-        <label>目标价格（可选）</label>
-        <input id="targetPriceInput" type="number" min="0" step="0.01" placeholder="当前价 ≥ 目标价时触发" value="${targetPriceVal}">
-      </div>
-      <div class="field">
-        <label>目标涨跌幅 %（可选）</label>
-        <input id="targetChangeRateInput" type="number" min="0" step="0.1" placeholder="如 5 表示涨跌幅达5%时触发" value="${targetChangeRateVal}">
-        <div class="hint">涨跌幅绝对值达到设定值时触发</div>
-      </div>
-    </div>
-  </div>
   <div class="error" id="errMsg"></div>
   <div class="loading" id="loadMsg"></div>
   <div class="btn-row">
@@ -222,25 +191,19 @@ window.addEventListener('message', e => {
 
 $('cancelBtn').onclick = () => vscode.postMessage({ type: 'cancel' });
 
-$('alertEnabledCheck').addEventListener('change', e => {
-  $('alertFields').classList.toggle('active', e.target.checked);
-});
 
 $('okBtn').onclick = () => {
   const codeOrName = ($('codeOrName').value || '').trim();
   const alias = ($('alias').value || '').trim();
   const purchasePrice = parseFloat($('purchasePrice').value) || 0;
   const shares = parseInt($('shares').value) || 0;
-  const alertEnabled = $('alertEnabledCheck').checked;
-  const targetPrice = parseFloat($('targetPriceInput').value) || 0;
-  const targetChangeRate = parseFloat($('targetChangeRateInput').value) || 0;
 
   if (!codeOrName) { $('errMsg').textContent = '请输入股票代码或名称'; $('errMsg').style.display='block'; return; }
   if (shares > 0 && shares % 100 !== 0) { $('errMsg').textContent = '持仓数量须为100的倍数'; $('errMsg').style.display='block'; return; }
 
   $('errMsg').style.display='none';
   $('okBtn').disabled = true;
-  vscode.postMessage({ type: 'submit', codeOrName, alias, purchasePrice, shares, alertEnabled, targetPrice, targetChangeRate });
+  vscode.postMessage({ type: 'submit', codeOrName, alias, purchasePrice, shares });
 };
 
 // 回车提交

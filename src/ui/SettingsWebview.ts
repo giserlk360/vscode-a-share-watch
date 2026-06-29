@@ -5,14 +5,13 @@
  */
 
 import * as vscode from 'vscode';
-import { PluginSettings, DecorationDisplayOptions } from '../types';
+import { PluginSettings } from '../types';
 import { IPriceMonitor } from '../business/PriceMonitor';
 import { IStockManager } from '../data/StockManager';
 
 /** CommentDecorator 设置同步接口 */
 export interface IDecorationSettingsSync {
   setStealthMode(enabled: boolean): void;
-  updateDecorationDisplay(options: DecorationDisplayOptions): void;
 }
 
 export class SettingsWebviewProvider implements vscode.WebviewViewProvider {
@@ -50,9 +49,6 @@ export class SettingsWebviewProvider implements vscode.WebviewViewProvider {
         case 'save':
           await this._handleSave(message.settings);
           break;
-        case 'previewAlert':
-          this._handlePreviewAlert();
-          break;
       }
     });
 
@@ -75,82 +71,18 @@ export class SettingsWebviewProvider implements vscode.WebviewViewProvider {
     this._view.webview.postMessage({ type: 'init', settings });
   }
 
-  private async _handleSave(settings: PluginSettings): Promise<void> {
+  private async _handleSave(settings: Partial<PluginSettings>): Promise<void> {
     try {
       await this.priceMonitor.updateSettings(settings);
-      // 同步隐蔽模式和装饰显示选项到 CommentDecorator
-      if (this.decoratorSync) {
+      // 同步隐蔽模式到 CommentDecorator
+      if (this.decoratorSync && settings.stealthMode !== undefined) {
         this.decoratorSync.setStealthMode(!!settings.stealthMode);
-        if (settings.decorationDisplay) {
-          this.decoratorSync.updateDecorationDisplay(settings.decorationDisplay);
-        }
       }
     } catch (err) {
       vscode.window.showErrorMessage(`保存设置失败：${(err as Error).message}`);
     }
   }
 
-  private _handlePreviewAlert(): void {
-    const settings = this.priceMonitor.getSettings();
-    const template = settings.popupTemplate || '⚠️ {name} 已达目标价！当前价格：{price}，涨跌幅：{changeRate}%';
-    const message = template
-      .replace(/\{name\}/g, '招商银行')
-      .replace(/\{price\}/g, '42.50')
-      .replace(/\{changeRate\}/g, '+5.20');
-
-    const mode = settings.alertMode || 'popup';
-
-    // 预览闪烁效果
-    if (mode === 'intense' || mode === 'both') {
-      const editor = vscode.window.activeTextEditor;
-      if (editor) {
-        const doc = editor.document;
-        const commentRanges: vscode.Range[] = [];
-        let inBlock = false;
-        for (let i = 0; i < doc.lineCount; i++) {
-          const lineText = doc.lineAt(i).text.trimStart();
-          if (inBlock) {
-            commentRanges.push(doc.lineAt(i).range);
-            if (lineText.includes('*/')) { inBlock = false; }
-          } else if (lineText.startsWith('//') || lineText.startsWith('#') || lineText.startsWith('--') || lineText.startsWith('<!--')) {
-            commentRanges.push(doc.lineAt(i).range);
-          } else if (lineText.startsWith('/*') || lineText.startsWith('/**')) {
-            commentRanges.push(doc.lineAt(i).range);
-            if (!lineText.includes('*/')) { inBlock = true; }
-          } else if (lineText.startsWith('*')) {
-            commentRanges.push(doc.lineAt(i).range);
-          }
-        }
-        if (commentRanges.length > 0) {
-          const flashDecoration = vscode.window.createTextEditorDecorationType({
-            backgroundColor: 'rgba(255, 0, 0, 0.35)',
-            isWholeLine: true,
-          });
-          const flashCount = settings.alertFlashCount ?? 3;
-          const totalSteps = flashCount * 2;
-          let count = 0;
-          const timer = setInterval(() => {
-            if (count % 2 === 0) {
-              editor.setDecorations(flashDecoration, commentRanges);
-            } else {
-              editor.setDecorations(flashDecoration, []);
-            }
-            count++;
-            if (count >= totalSteps) {
-              clearInterval(timer);
-              editor.setDecorations(flashDecoration, []);
-              flashDecoration.dispose();
-            }
-          }, 400);
-        }
-      }
-    }
-
-    // 预览弹窗
-    if (mode === 'popup' || mode === 'both') {
-      vscode.window.showWarningMessage(message, '知道了');
-    }
-  }
 
   private _buildHtml(): string {
     return `<!DOCTYPE html>
@@ -201,26 +133,6 @@ select{width:auto;min-width:90px}
   <div class="hint" style="margin-bottom:6px">选择哪些指数显示在股票列表中</div>
   <div id="stockListKwList"></div>
 </div>
-<div class="section">
-  <div class="section-title">注释显示内容</div>
-  <div class="row"><label>当前价格</label><label class="toggle"><input type="checkbox" id="showPrice"><span class="track"></span></label></div>
-  <div class="row"><label>涨跌幅</label><label class="toggle"><input type="checkbox" id="showChangeRate"><span class="track"></span></label></div>
-  <div class="row"><label>涨跌额</label><label class="toggle"><input type="checkbox" id="showChangeAmount"><span class="track"></span></label></div>
-  <div class="row"><label>持仓盈亏</label><label class="toggle"><input type="checkbox" id="showPositionProfit"><span class="track"></span></label></div>
-  <div class="row"><label>当日盈亏</label><label class="toggle"><input type="checkbox" id="showDailyProfit"><span class="track"></span></label></div>
-</div>
-<div class="section">
-  <div class="section-title">价格预警</div>
-  <div class="row"><label>预警方式</label><select id="alertMode"><option value="popup">弹窗提示</option><option value="intense">强烈闪烁</option><option value="both">两者都用</option></select></div>
-  <div class="row"><label>持续时间（秒）</label><input type="number" id="alertDuration" min="1" max="3600" value="60"></div>
-  <div class="row"><label>闪烁次数</label><input type="number" id="alertFlashCount" min="1" max="20" value="3"></div>
-  <div class="row-v">
-    <label>弹窗内容模板</label>
-    <textarea class="full" id="popupTemplate" rows="3" style="resize:vertical;font-size:11px;line-height:1.4" placeholder="⚠️ {name} 已达目标价！当前价格：{price}，涨跌幅：{changeRate}%"></textarea>
-    <div class="hint">支持占位符：{name} {price} {changeRate}</div>
-    <button id="previewAlertBtn" style="margin-top:4px;background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground);border:none;padding:4px 12px;cursor:pointer;font-size:11px;border-radius:2px">预览预警效果</button>
-  </div>
-</div>
 <script>
 const vscode = acquireVsCodeApi();
 const $ = id => document.getElementById(id);
@@ -246,17 +158,6 @@ function fill(s) {
   $('slShowProfit').checked = sd.showProfit !== false;
   $('slShowPositionChangeRate').checked = !!sd.showPositionChangeRate;
   $('slShowPositionAmount').checked = !!sd.showPositionAmount;
-  $('alertMode').value = s.alertMode ?? 'popup';
-  $('alertDuration').value = s.alertDuration ?? 60;
-  $('alertFlashCount').value = s.alertFlashCount ?? 3;
-  $('popupTemplate').value = s.popupTemplate ?? '';
-  // 注释显示内容
-  const dd = s.decorationDisplay || {};
-  $('showPrice').checked = dd.showPrice !== false;
-  $('showChangeRate').checked = dd.showChangeRate !== false;
-  $('showChangeAmount').checked = !!dd.showChangeAmount;
-  $('showPositionProfit').checked = !!dd.showPositionProfit;
-  $('showDailyProfit').checked = !!dd.showDailyProfit;
   // 指数列表显示
   const defaultNames = ['上证指数','深证成指','创业板指','沪深300','科创50'];
   const defaultCodes = {'上证指数':'sh000001','深证成指':'sz399001','创业板指':'sz399006','沪深300':'sh000300','科创50':'sh000688'};
@@ -278,17 +179,6 @@ function read() {
       showPositionChangeRate: $('slShowPositionChangeRate').checked,
       showPositionAmount: $('slShowPositionAmount').checked,
     },
-    alertMode: $('alertMode').value,
-    alertDuration: parseInt($('alertDuration').value) || 60,
-    alertFlashCount: parseInt($('alertFlashCount').value) || 3,
-    popupTemplate: $('popupTemplate').value.trim(),
-    decorationDisplay: {
-      showPrice: $('showPrice').checked,
-      showChangeRate: $('showChangeRate').checked,
-      showChangeAmount: $('showChangeAmount').checked,
-      showPositionProfit: $('showPositionProfit').checked,
-      showDailyProfit: $('showDailyProfit').checked,
-    },
     stockListKeywords: { ...stockListKw },
   };
 }
@@ -301,17 +191,11 @@ function autoSave() {
 }
 
 // 为所有控件绑定即时保存
-['showPrice','showChangeRate','showChangeAmount','showPositionProfit','showDailyProfit','slShowCode','slShowCurrentPrice','slShowChangeRate','slShowPurchasePrice','slShowShares','slShowProfit','slShowPositionChangeRate','slShowPositionAmount'].forEach(id => {
+['slShowCode','slShowCurrentPrice','slShowChangeRate','slShowPurchasePrice','slShowShares','slShowProfit','slShowPositionChangeRate','slShowPositionAmount'].forEach(id => {
   $(id).addEventListener('change', autoSave);
 });
-['refreshInterval','alertDuration','alertFlashCount'].forEach(id => {
+['refreshInterval'].forEach(id => {
   $(id).addEventListener('input', autoSave);
-});
-$('alertMode').addEventListener('change', autoSave);
-$('popupTemplate').addEventListener('input', autoSave);
-
-$('previewAlertBtn').addEventListener('click', () => {
-  vscode.postMessage({ type: 'previewAlert' });
 });
 
 // ── 指数列表显示 ──

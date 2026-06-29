@@ -43,12 +43,6 @@ export interface StockEntry {
   alias?: string;
   /** 买入价格（可选，用于计算盈亏） */
   purchasePrice?: number;
-  /** 目标价格（可选，触发预警） */
-  targetPrice?: number;
-  /** 目标涨跌幅（可选，触发预警，百分比） */
-  targetChangeRate?: number;
-  /** 是否启用价格预警 */
-  alertEnabled: boolean;
   /** 是否参与状态栏轮播 */
   carouselEnabled: boolean;
   /** 持仓数量（可选，须为100的倍数） */
@@ -130,14 +124,6 @@ export interface PluginSettings {
   carouselEnabled: boolean;
   /** 状态栏轮播间隔（秒），默认 5 */
   carouselInterval: number;
-  /** 价格预警方式 */
-  alertMode: 'popup' | 'intense' | 'both';
-  /** 弹窗提示内容模板，支持 {name}、{price}、{changeRate} 占位符 */
-  popupTemplate: string;
-  /** 高强度预警状态栏固定显示时长（秒），默认 60 */
-  alertDuration: number;
-  /** 高强度预警闪烁次数，默认 3 */
-  alertFlashCount: number;
   /** 注释装饰显示选项 */
   decorationDisplay: DecorationDisplayOptions;
   /** 轮播显示选项 */
@@ -150,20 +136,6 @@ export interface PluginSettings {
   carouselKeywords: Record<string, boolean>;
   /** 特殊词汇列表显示开关，key: 别名, value: 是否在股票列表中显示 */
   stockListKeywords: Record<string, boolean>;
-}
-
-/**
- * 价格预警配置
- */
-export interface AlertConfig {
-  /** 预警方式：popup（弹窗）、intense（高强度闪烁）、both（两者） */
-  mode: 'popup' | 'intense' | 'both';
-  /** 弹窗提示内容模板，支持 {name}、{price}、{changeRate} 占位符 */
-  popupTemplate: string;
-  /** 高强度预警状态栏固定显示时长（秒） */
-  intenseDuration: number;
-  /** 高强度预警闪烁次数 */
-  flashCount?: number;
 }
 
 /**
@@ -209,18 +181,6 @@ export interface KlineDay {
 }
 
 /**
- * 预警历史记录
- */
-export interface AlertHistoryEntry {
-  /** 股票代码 */
-  code: string;
-  /** 触发时间戳（毫秒） */
-  triggeredAt: number;
-  /** 触发时的价格 */
-  price: number;
-}
-
-/**
  * 注释扫描匹配结果
  */
 export interface CommentMatch {
@@ -244,10 +204,6 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   stealthMode: false,
   carouselEnabled: true,
   carouselInterval: 5,
-  alertMode: 'popup',
-  popupTemplate: '⚠️ {name} 已达目标价！当前价格：{price}，涨跌幅：{changeRate}%',
-  alertDuration: 60,
-  alertFlashCount: 3,
   decorationDisplay: {
     showPrice: true,
     showChangeRate: true,
@@ -295,8 +251,8 @@ export const STORAGE_KEYS = {
   PORTFOLIO: 'vscode-stock-monitor.portfolio',
   /** 预购股存储键 */
   WISHLIST: 'vscode-stock-monitor.wishlist',
+  /** 明日计划存储键 */
+  PLAN: 'vscode-stock-monitor.plan',
   /** 插件设置存储键 */
   SETTINGS: 'vscode-stock-monitor.settings',
-  /** 预警历史存储键 */
-  ALERT_HISTORY: 'vscode-stock-monitor.alertHistory',
 } as const;

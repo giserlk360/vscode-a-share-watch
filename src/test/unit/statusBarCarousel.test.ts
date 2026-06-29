@@ -30,7 +30,6 @@ function makeEntry(code: string, carouselEnabled: boolean): StockEntry {
   return {
     code,
     name: code,
-    alertEnabled: false,
     carouselEnabled,
     addedAt: Date.now(),
   };

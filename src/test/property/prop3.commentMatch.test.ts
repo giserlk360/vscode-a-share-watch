@@ -67,7 +67,6 @@ function makeStockEntry(code: string, name: string, alias?: string): StockEntry 
     code,
     name,
     alias,
-    alertEnabled: false,
     carouselEnabled: true,
     addedAt: Date.now(),
   };

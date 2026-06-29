@@ -18,7 +18,16 @@
 import * as fc from 'fast-check';
 import { AlertSystem } from '../../business/AlertSystem';
 import { MockExtensionContext } from '../__mocks__/vscode';
-import { StockData, AlertConfig } from '../../types';
+import { StockData } from '../../types';
+
+// ─── 本地类型定义（原 AlertConfig 已从 types.ts 移除） ──
+
+interface AlertConfig {
+  mode: 'popup' | 'intense' | 'both';
+  popupTemplate: string;
+  intenseDuration: number;
+  flashCount?: number;
+}
 
 // ─── 辅助函数 ─────────────────────────────────────────────────────────────────
 
