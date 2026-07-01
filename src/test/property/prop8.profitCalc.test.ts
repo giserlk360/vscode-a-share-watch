@@ -27,7 +27,6 @@ function makeEntry(code: string, purchasePrice: number): StockEntry {
     code,
     name: `股票_${code}`,
     purchasePrice,
-    carouselEnabled: false,
     addedAt: Date.now(),
   };
 }
@@ -123,7 +122,6 @@ describe('Property 8: 盈亏计算正确性', () => {
         const entry: StockEntry = {
           code: 'sh600036',
           name: '测试股票',
-          carouselEnabled: false,
           addedAt: Date.now(),
         };
         const priceMap = new Map([['sh600036', currentPrice]]);

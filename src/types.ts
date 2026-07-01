@@ -43,28 +43,10 @@ export interface StockEntry {
   alias?: string;
   /** 买入价格（可选，用于计算盈亏） */
   purchasePrice?: number;
-  /** 是否参与状态栏轮播 */
-  carouselEnabled: boolean;
   /** 持仓数量（可选，须为100的倍数） */
   shares?: number;
   /** 添加时间戳（毫秒） */
   addedAt: number;
-}
-
-/**
- * 轮播显示选项
- */
-export interface CarouselDisplayOptions {
-  /** 显示涨跌幅 */
-  showChangeRate: boolean;
-  /** 显示涨跌额 */
-  showChangeAmount: boolean;
-  /** 显示持仓盈亏 */
-  showPositionProfit: boolean;
-  /** 显示当日盈亏 */
-  showDailyProfit: boolean;
-  /** 显示别名（替代股票名称） */
-  showAlias: boolean;
 }
 
 /**
@@ -116,26 +98,18 @@ export interface StockListDisplayOptions {
  * 持久化到 VSCode globalState
  */
 export interface PluginSettings {
-  /** 股票数据刷新间隔（秒），默认 10 */
+  /** 股票数据刷新间隔（秒），默认 5 */
   refreshInterval: number;
   /** 隐蔽模式：使股票信息颜色与注释颜色一致 */
   stealthMode: boolean;
-  /** 是否启用状态栏轮播 */
-  carouselEnabled: boolean;
-  /** 状态栏轮播间隔（秒），默认 5 */
-  carouselInterval: number;
   /** 注释装饰显示选项 */
   decorationDisplay: DecorationDisplayOptions;
-  /** 轮播显示选项 */
-  carouselDisplay: CarouselDisplayOptions;
   /** 股票列表显示选项 */
   stockListDisplay: StockListDisplayOptions;
   /** 是否自动将走势弱的自选股加入预购股 */
   autoWishlistEnabled: boolean;
   /** 用户自定义特殊词汇别名，key: 别名, value: 股票代码（带前缀） */
   customKeywords: Record<string, string>;
-  /** 特殊词汇轮播开关，key: 别名, value: 是否参与轮播 */
-  carouselKeywords: Record<string, boolean>;
   /** 特殊词汇列表显示开关，key: 别名, value: 是否在股票列表中显示 */
   stockListKeywords: Record<string, boolean>;
 }
@@ -152,6 +126,8 @@ export interface ExportData {
   stocks: StockEntry[];
   /** 插件设置（可选） */
   settings?: Partial<PluginSettings>;
+  /** 持有股列表（可选） */
+  portfolio?: StockEntry[];
 }
 
 /**
@@ -202,23 +178,14 @@ export interface CommentMatch {
  * 默认插件设置
  */
 export const DEFAULT_SETTINGS: PluginSettings = {
-  refreshInterval: 10,
+  refreshInterval: 5,
   stealthMode: false,
-  carouselEnabled: true,
-  carouselInterval: 5,
   decorationDisplay: {
     showPrice: true,
     showChangeRate: true,
     showChangeAmount: false,
     showPositionProfit: false,
     showDailyProfit: false,
-  },
-  carouselDisplay: {
-    showChangeRate: true,
-    showChangeAmount: false,
-    showPositionProfit: false,
-    showDailyProfit: false,
-    showAlias: true,
   },
   stockListDisplay: {
     showCode: true,
@@ -227,8 +194,8 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     showPurchasePrice: true,
     showShares: true,
     showProfit: true,
-    showPositionChangeRate: false,
-    showPositionAmount: false,
+    showPositionChangeRate: true,
+    showPositionAmount: true,
     sortOrder: null,
     activeTab: 'watchlist',
   },
@@ -240,8 +207,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     '沪深300': 'sh000300',
     '科创50': 'sh000688',
   },
-  carouselKeywords: {},
-  stockListKeywords: {},
+  stockListKeywords: { '上证指数': true },
 };
 
 /**

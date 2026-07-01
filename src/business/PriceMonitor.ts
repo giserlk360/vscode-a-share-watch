@@ -28,17 +28,6 @@ export interface ICommentDecorator {
   collectCommentCodes?(): string[];
 }
 
-/**
- * StatusBarCarousel 的最小接口
- */
-export interface IStatusBarCarousel {
-  updateData(stocks: StockData[]): void;
-  setInterval(seconds: number): void;
-  updateEntries(entries: import('../types').StockEntry[]): void;
-  updateDisplayOptions(options: import('../types').CarouselDisplayOptions): void;
-  updateSettings?(settings: import('../types').PluginSettings): void;
-}
-
 // ─── IPriceMonitor 接口 ───────────────────────────────────────────────────────
 
 export interface IPriceMonitor {
@@ -68,9 +57,6 @@ export class PriceMonitor implements IPriceMonitor {
   /** 已注册的装饰器列表（支持多个，如 CommentDecorator + WebviewView） */
   private decorators: ICommentDecorator[] = [];
 
-  /** 已注册的状态栏轮播（可选，延迟注入） */
-  private statusBarCarousel: IStatusBarCarousel | null = null;
-
   /** 上次根据走势自动加入预购股的扫描时间 */
   private lastAutoWishlistScanAt = 0;
 
@@ -96,13 +82,6 @@ export class PriceMonitor implements IPriceMonitor {
    */
   registerDecorator(decorator: ICommentDecorator): void {
     this.decorators.push(decorator);
-  }
-
-  /**
-   * 注册状态栏轮播
-   */
-  registerCarousel(carousel: IStatusBarCarousel): void {
-    this.statusBarCarousel = carousel;
   }
 
   // ── IPriceMonitor 实现 ────────────────────────────────────────────────────────
@@ -175,11 +154,6 @@ export class PriceMonitor implements IPriceMonitor {
       this.stop();
       this.start();
     }
-
-    // 若修改了轮播间隔，通知轮播组件
-    if (patch.carouselInterval !== undefined && this.statusBarCarousel !== null) {
-      this.statusBarCarousel.setInterval(patch.carouselInterval);
-    }
   }
 
   /**
@@ -196,7 +170,6 @@ export class PriceMonitor implements IPriceMonitor {
   dispose(): void {
     this.stop();
     this.decorators = [];
-    this.statusBarCarousel = null;
     console.log('[PriceMonitor] 已释放资源');
   }
 
@@ -260,22 +233,6 @@ export class PriceMonitor implements IPriceMonitor {
       }
     }
 
-    // 分发给状态栏轮播
-    if (this.statusBarCarousel !== null) {
-      try {
-        this.statusBarCarousel.updateEntries(entries);
-        if (this.settings.carouselDisplay) {
-          this.statusBarCarousel.updateDisplayOptions(this.settings.carouselDisplay);
-        }
-        if (typeof this.statusBarCarousel.updateSettings === 'function') {
-          this.statusBarCarousel.updateSettings(this.settings);
-        }
-        this.statusBarCarousel.updateData(stocks);
-      } catch (err) {
-        console.error('[PriceMonitor] StatusBarCarousel.updateData 失败:', err);
-      }
-    }
-
   }
 
   private async _autoAddWishlistByTrend(watchlistEntries: StockEntry[]): Promise<void> {
@@ -305,7 +262,6 @@ export class PriceMonitor implements IPriceMonitor {
 
         await this.stockManager.addWishlist({
           ...entry,
-          carouselEnabled: entry.carouselEnabled ?? true,
           addedAt: Date.now(),
         });
         wishlistCodes.add(entry.code.toLowerCase());
@@ -364,10 +320,6 @@ export class PriceMonitor implements IPriceMonitor {
           ...DEFAULT_SETTINGS.decorationDisplay,
           ...(stored.decorationDisplay || {}),
         };
-        const carouselDisplay = {
-          ...DEFAULT_SETTINGS.carouselDisplay,
-          ...(stored.carouselDisplay || {}),
-        };
         // 清理 customKeywords 中的旧重复项，只保留去重后的默认原名和用户别名
         const defaultNames = Object.keys(DEFAULT_SETTINGS.customKeywords);
         const defaultCodes = Object.values(DEFAULT_SETTINGS.customKeywords);
@@ -383,7 +335,7 @@ export class PriceMonitor implements IPriceMonitor {
             cleanKw[k] = v;
           }
         }
-        return { ...DEFAULT_SETTINGS, ...stored, decorationDisplay, carouselDisplay, customKeywords: cleanKw };
+        return { ...DEFAULT_SETTINGS, ...stored, decorationDisplay, customKeywords: cleanKw };
       }
     } catch (err) {
       console.error('[PriceMonitor] 从 globalState 加载设置失败，使用默认值:', err);

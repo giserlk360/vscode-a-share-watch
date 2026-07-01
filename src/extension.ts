@@ -6,13 +6,11 @@ import * as vscode from 'vscode';
 import { StockDataProvider } from './data/StockDataProvider';
 import { StockManager } from './data/StockManager';
 import { PriceMonitor } from './business/PriceMonitor';
-import { StatusBarCarousel } from './ui/StatusBarCarousel';
 import { CommentDecorator } from './ui/CommentDecorator';
 import { StockWebviewView } from './ui/StockWebviewView';
 import { SettingsWebviewProvider } from './ui/SettingsWebview';
 
 let priceMonitor: PriceMonitor | undefined;
-let statusBarCarousel: StatusBarCarousel | undefined;
 let commentDecorator: CommentDecorator | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -21,21 +19,15 @@ export function activate(context: vscode.ExtensionContext): void {
   const dataProvider = new StockDataProvider();
   const stockManager = new StockManager(context);
 
-  const tempMonitor = new PriceMonitor(dataProvider, stockManager, context);
-  const currentSettings = tempMonitor.getSettings();
-  tempMonitor.dispose();
-
   const initialEntries = stockManager.getAll();
   const portfolioEntries = stockManager.getPortfolio();
   const wishlistEntries = stockManager.getWishlist();
   const allInitial = [...initialEntries, ...portfolioEntries, ...wishlistEntries];
-  statusBarCarousel = new StatusBarCarousel(allInitial);
   commentDecorator = new CommentDecorator(allInitial);
   commentDecorator.activate(context);
 
   priceMonitor = new PriceMonitor(dataProvider, stockManager, context);
   priceMonitor.registerDecorator(commentDecorator);
-  priceMonitor.registerCarousel(statusBarCarousel);
 
   // 股票列表侧边栏 Webview
   const stockWebviewView = new StockWebviewView(context, stockManager, dataProvider, priceMonitor);
@@ -50,31 +42,12 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerWebviewViewProvider(SettingsWebviewProvider.viewType, settingsProvider),
   );
 
-  if (currentSettings.carouselEnabled) {
-    statusBarCarousel.setInterval(currentSettings.carouselInterval);
-    statusBarCarousel.start();
-  }
-
   priceMonitor.start();
 
   context.subscriptions.push(
     vscode.commands.registerCommand('stock-monitor.refreshView', () => {
       // 触发 webview 重新发送当前列表
       stockWebviewView.refresh([]);
-    }),
-    vscode.commands.registerCommand('vscode-stock-monitor.toggleCarousel', async () => {
-      if (!priceMonitor || !statusBarCarousel) { return; }
-      const s = priceMonitor.getSettings();
-      const enabled = !s.carouselEnabled;
-      await priceMonitor.updateSettings({ carouselEnabled: enabled });
-      if (enabled) {
-        statusBarCarousel.setInterval(priceMonitor.getSettings().carouselInterval);
-        statusBarCarousel.start();
-        vscode.window.showInformationMessage('✅ 状态栏轮播已开启');
-      } else {
-        statusBarCarousel.stop();
-        vscode.window.showInformationMessage('⏸️ 状态栏轮播已关闭');
-      }
     }),
     vscode.commands.registerCommand('vscode-stock-monitor.toggleStealthMode', async () => {
       if (!priceMonitor || !commentDecorator) { return; }
@@ -88,7 +61,6 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.commands.executeCommand('settingsView.focus');
     }),
     { dispose: () => priceMonitor?.dispose() },
-    { dispose: () => statusBarCarousel?.dispose() },
     { dispose: () => commentDecorator?.dispose() },
   );
 
@@ -97,6 +69,5 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export function deactivate(): void {
   priceMonitor?.dispose(); priceMonitor = undefined;
-  statusBarCarousel?.dispose(); statusBarCarousel = undefined;
   commentDecorator?.dispose(); commentDecorator = undefined;
 }

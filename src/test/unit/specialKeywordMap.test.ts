@@ -14,7 +14,6 @@ function makeEntry(code: string, alias?: string, purchasePrice?: number): StockE
     name: `股票_${code}`,
     alias,
     purchasePrice,
-    carouselEnabled: false,
     addedAt: Date.now(),
   };
 }

@@ -13,7 +13,6 @@ function makeEntry(overrides: Partial<StockEntry> = {}): StockEntry {
   return {
     code: 'sh600036',
     name: '招商银行',
-    carouselEnabled: true,
     addedAt: Date.now(),
     ...overrides,
   };
@@ -181,7 +180,7 @@ describe('importJSON 格式错误', () => {
       version: '1.0',
       exportedAt: new Date().toISOString(),
       stocks: [
-        { code: 'invalid', name: '测试', carouselEnabled: true, addedAt: Date.now() },
+        { code: 'invalid', name: '测试', addedAt: Date.now() },
       ],
     });
     await expect(mgr.importJSON(bad)).rejects.toThrow();

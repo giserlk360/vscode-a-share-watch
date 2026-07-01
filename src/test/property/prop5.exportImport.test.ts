@@ -41,7 +41,6 @@ const stockEntryArb: fc.Arbitrary<StockEntry> = fc.record({
     fc.float({ min: Math.fround(0.01), max: Math.fround(9999), noNaN: true }),
     { nil: undefined }
   ),
-  carouselEnabled: fc.boolean(),
   addedAt: fc.integer({ min: 0, max: Date.now() }),
 });
 
@@ -59,7 +58,6 @@ function assertStockEntryEqual(actual: StockEntry, expected: StockEntry): void {
   expect(actual.code).toBe(expected.code);
   expect(actual.name).toBe(expected.name);
   expect(actual.alias).toBe(expected.alias);
-  expect(actual.carouselEnabled).toBe(expected.carouselEnabled);
   expect(actual.addedAt).toBe(expected.addedAt);
 
   if (expected.purchasePrice === undefined) {
@@ -158,7 +156,7 @@ describe('Property 5: 导出导入往返一致性', () => {
     const missingCode = JSON.stringify({
       version: '1.0',
       exportedAt: new Date().toISOString(),
-      stocks: [{ name: '招商银行', carouselEnabled: false, addedAt: 1000 }],
+      stocks: [{ name: '招商银行', addedAt: 1000 }],
     });
     await expect(manager.importJSON(missingCode)).rejects.toThrow();
 
@@ -166,23 +164,15 @@ describe('Property 5: 导出导入往返一致性', () => {
     const missingName = JSON.stringify({
       version: '1.0',
       exportedAt: new Date().toISOString(),
-      stocks: [{ code: 'sh600036', carouselEnabled: false, addedAt: 1000 }],
+      stocks: [{ code: 'sh600036', addedAt: 1000 }],
     });
     await expect(manager.importJSON(missingName)).rejects.toThrow();
-
-    // 缺少 carouselEnabled 字段
-    const missingCarousel = JSON.stringify({
-      version: '1.0',
-      exportedAt: new Date().toISOString(),
-      stocks: [{ code: 'sh600036', name: '招商银行', addedAt: 1000 }],
-    });
-    await expect(manager.importJSON(missingCarousel)).rejects.toThrow();
 
     // 缺少 addedAt 字段
     const missingAddedAt = JSON.stringify({
       version: '1.0',
       exportedAt: new Date().toISOString(),
-      stocks: [{ code: 'sh600036', name: '招商银行', carouselEnabled: false }],
+      stocks: [{ code: 'sh600036', name: '招商银行' }],
     });
     await expect(manager.importJSON(missingAddedAt)).rejects.toThrow();
   });

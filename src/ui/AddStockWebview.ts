@@ -100,7 +100,6 @@ export class AddStockWebview {
               alias: alias?.trim() || undefined,
               purchasePrice: purchasePrice > 0 ? purchasePrice : undefined,
               shares: shares > 0 ? shares : undefined,
-              carouselEnabled: true,
               addedAt: Date.now(),
             };
             await stockManager.add(entry);

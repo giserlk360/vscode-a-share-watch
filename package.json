@@ -1,13 +1,13 @@
 {
   "name": "vscode-a-share-watch",
   "displayName": "A股盯盘",
-  "description": "在 VS Code 侧边栏查看 A 股行情，支持自选股、持有股、预购股、持仓盈亏、状态栏轮播和走势查看",
-  "version": "0.0.4",
-  "publisher": "chenyangyang",
+  "description": "在 VS Code 侧边栏查看 A 股行情，支持自选股、持有股、预购股、持仓盈亏和走势查看",
+  "version": "0.0.2",
+  "publisher": "giserlk360",
   "icon": "resources/icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Mrxulovemingming/vscode-stock-monitor"
+    "url": "https://github.com/giserlk360/vscode-a-share-watch"
   },
   "engines": {
     "vscode": "^1.80.0"
@@ -71,10 +71,6 @@
         "icon": "$(trash)"
       },
       {
-        "command": "vscode-stock-monitor.toggleCarousel",
-        "title": "切换状态栏轮播"
-      },
-      {
         "command": "vscode-stock-monitor.refreshStocks",
         "title": "刷新股票数据",
         "icon": "$(refresh)"
@@ -120,16 +116,6 @@
           "type": "number",
           "default": 10,
           "description": "股票数据刷新间隔（秒）"
-        },
-        "vscode-stock-monitor.carouselEnabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "启用状态栏股票轮播"
-        },
-        "vscode-stock-monitor.carouselInterval": {
-          "type": "number",
-          "default": 5,
-          "description": "状态栏轮播间隔（秒）"
         }
       }
     }

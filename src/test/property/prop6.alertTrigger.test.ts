@@ -36,7 +36,6 @@ interface TestStockEntry {
   alertEnabled: boolean;
   targetPrice?: number;
   targetChangeRate?: number;
-  carouselEnabled: boolean;
   addedAt: number;
 }
 
@@ -89,7 +88,6 @@ function makeStockEntry(
     code: 'sh600036',
     name: '招商银行',
     alertEnabled,
-    carouselEnabled: false,
     addedAt: Date.now(),
     targetPrice,
     targetChangeRate,

@@ -22,7 +22,6 @@ interface TestStockEntry {
   alertEnabled: boolean;
   targetPrice?: number;
   targetChangeRate?: number;
-  carouselEnabled: boolean;
   addedAt: number;
 }
 
@@ -49,7 +48,6 @@ function makeEntry(overrides: Partial<TestStockEntry> = {}): TestStockEntry {
     code: 'sh600036',
     name: '招商银行',
     alertEnabled: true,
-    carouselEnabled: false,
     addedAt: Date.now(),
     ...overrides,
   };

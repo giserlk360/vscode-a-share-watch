@@ -37,7 +37,6 @@ const stockEntryArb: fc.Arbitrary<StockEntry> = fc.record({
   name: fc.string({ minLength: 1, maxLength: 20 }),
   alias: fc.option(fc.string({ minLength: 1, maxLength: 20 }), { nil: undefined }),
   purchasePrice: fc.option(fc.float({ min: Math.fround(0.01), max: Math.fround(9999), noNaN: true }), { nil: undefined }),
-  carouselEnabled: fc.boolean(),
   addedAt: fc.integer({ min: 0, max: Date.now() }),
 });
 
@@ -76,7 +75,6 @@ describe('Property 4: 配置持久化往返一致性', () => {
         expect(stored.code).toBe(entry.code);
         expect(stored.name).toBe(entry.name);
         expect(stored.alias).toBe(entry.alias);
-        expect(stored.carouselEnabled).toBe(entry.carouselEnabled);
         expect(stored.addedAt).toBe(entry.addedAt);
 
         // 可选数值字段：若原始值为 undefined 则存储也应为 undefined，否则值相等
@@ -118,7 +116,6 @@ describe('Property 4: 配置持久化往返一致性', () => {
           expect(s.code).toBe(original.code);
           expect(s.name).toBe(original.name);
           expect(s.alias).toBe(original.alias);
-          expect(s.carouselEnabled).toBe(original.carouselEnabled);
           expect(s.addedAt).toBe(original.addedAt);
 
           if (original.purchasePrice === undefined) {

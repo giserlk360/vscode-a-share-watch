@@ -36,6 +36,8 @@ export interface IStockManager {
   removePortfolio(code: string): Promise<void>;
   updatePortfolio(code: string, patch: Partial<StockEntry>): Promise<void>;
   getPortfolio(): StockEntry[];
+  exportPortfolioJSON(): string;
+  importPortfolioJSON(json: string): Promise<ImportBatchResult>;
   // 预购股 CRUD
   addWishlist(entry: StockEntry): Promise<void>;
   removeWishlist(code: string): Promise<void>;
@@ -301,11 +303,10 @@ export class StockManager implements IStockManager {
       }
 
       // 添加到内存列表（默认值 + entry 可选字段，code/名称/内部字段始终用标准值）
-      const { code: _c, name: _n, carouselEnabled: _ca, addedAt: _at, ...safeEntry } = entry;
+      const { code: _c, name: _n, addedAt: _at, ...safeEntry } = entry;
       this.stocks.push({
         code: normalizedCode,
         name: entry.name || entry.code,
-        carouselEnabled: true,
         addedAt: Date.now(),
         ...safeEntry,
       });
@@ -369,6 +370,78 @@ export class StockManager implements IStockManager {
    */
   getPortfolio(): StockEntry[] {
     return [...this.portfolio];
+  }
+
+  /**
+   * 导出持有股为 JSON 字符串
+   * 包含 version、exportedAt、portfolio 字段
+   * portfolio 条目保留完整 StockEntry 字段（purchasePrice、shares 等）
+   */
+  exportPortfolioJSON(): string {
+    const exportData = {
+      version: EXPORT_VERSION,
+      exportedAt: new Date().toISOString(),
+      portfolio: this.portfolio.map(e => ({ ...e })),
+    };
+    return JSON.stringify(exportData, null, 2);
+  }
+
+  /**
+   * 从 JSON 字符串导入持有股（合并式，跳过已存在代码）
+   * @param json JSON 字符串
+   * @throws 格式错误时抛出错误
+   */
+  async importPortfolioJSON(json: string): Promise<ImportBatchResult> {
+    let parsed: unknown;
+
+    try {
+      parsed = JSON.parse(json);
+    } catch (e) {
+      throw new Error(`导入失败：JSON 格式错误。${(e as Error).message}`);
+    }
+
+    if (!parsed || typeof parsed !== 'object') {
+      throw new Error('导入失败：JSON 必须是一个对象。');
+    }
+
+    const data = parsed as Record<string, unknown>;
+
+    if (typeof data.version !== 'string') {
+      throw new Error('导入失败：缺少 version 字段或格式不正确。');
+    }
+
+    if (!Array.isArray(data.portfolio)) {
+      throw new Error('导入失败：缺少 portfolio 字段或不是数组。');
+    }
+
+    const result: ImportBatchResult = { added: 0, skipped: 0, failed: 0, errors: [] };
+
+    for (let i = 0; i < data.portfolio.length; i++) {
+      const item = data.portfolio[i];
+      const validationError = this._validateStockEntry(item, i);
+      if (validationError) {
+        result.failed++;
+        result.errors.push(`第 ${i + 1} 条无效：${validationError}`);
+        continue;
+      }
+
+      const entry = item as StockEntry;
+      const normalizedCode = entry.code.toLowerCase();
+      const exists = this.portfolio.some(s => s.code.toLowerCase() === normalizedCode);
+      if (exists) {
+        result.skipped++;
+        continue;
+      }
+
+      this.portfolio.push({ ...entry, code: normalizedCode });
+      result.added++;
+    }
+
+    if (result.added > 0) {
+      await this._savePortfolioToStorage();
+    }
+
+    return result;
   }
 
   // ── 预购股 CRUD ──────────────────────────────────────────────────────────────
@@ -576,11 +649,6 @@ export class StockManager implements IStockManager {
     // 验证必填字段 name
     if (typeof entry.name !== 'string' || !entry.name) {
       return '缺少 name 字段或不是字符串。';
-    }
-
-    // 验证必填字段 carouselEnabled
-    if (typeof entry.carouselEnabled !== 'boolean') {
-      return '缺少 carouselEnabled 字段或不是布尔值。';
     }
 
     // 验证必填字段 addedAt

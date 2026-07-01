@@ -23,6 +23,8 @@ node_modules/
 # 版本控制
 .git/
 .gitignore
+.claude/
+.codegraph/
 
 # 编辑器配置
 .vscode/
@@ -30,6 +32,12 @@ node_modules/
 
 # 临时文件
 *.log
+*.vsix
+*.db
+*.db-shm
+*.db-wal
+*.pid
+**/*.map
 .DS_Store
 Thumbs.db
 

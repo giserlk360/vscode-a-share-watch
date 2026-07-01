@@ -73,6 +73,9 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
         case 'importStocks':
           await this._handleImport(msg.lines);
           break;
+        case 'importPortfolio':
+          await this._handleImportPortfolio(msg.json);
+          break;
         case 'exportStocks':
           await this._handleExport();
           break;
@@ -191,7 +194,6 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
         alias: msg.alias?.trim() || undefined,
         purchasePrice: msg.purchasePrice > 0 ? msg.purchasePrice : undefined,
         shares: msg.shares > 0 ? msg.shares : undefined,
-        carouselEnabled: true,
         addedAt: Date.now(),
       };
       await this.stockManager.add(entry);
@@ -223,7 +225,6 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
         name: msg.name,
         purchasePrice: msg.purchasePrice > 0 ? msg.purchasePrice : undefined,
         shares: msg.shares > 0 ? msg.shares : undefined,
-        carouselEnabled: true,
         addedAt: Date.now(),
       };
       await this.stockManager.addPortfolio(entry);
@@ -255,7 +256,6 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
         alias: msg.alias?.trim() || undefined,
         purchasePrice: msg.purchasePrice > 0 ? msg.purchasePrice : undefined,
         shares: msg.shares > 0 ? msg.shares : undefined,
-        carouselEnabled: true,
         addedAt: Date.now(),
       };
       await this.stockManager.addWishlist(entry);
@@ -359,7 +359,6 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
     const entries: StockEntry[] = resolved.map(r => ({
       code: r.code,
       name: r.name,
-      carouselEnabled: true,
       addedAt: Date.now(),
     }));
 
@@ -382,6 +381,31 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
   }
 
   private async _handleExport(): Promise<void> {
+    const settings = this.priceMonitor.getSettings();
+    const activeTab = settings.stockListDisplay?.activeTab || 'watchlist';
+
+    // 持有股 tab：导出持有股完整数据
+    if (activeTab === 'portfolio') {
+      const entries = this.stockManager.getPortfolio();
+      if (entries.length === 0) {
+        vscode.window.showInformationMessage('暂无持有股可导出');
+        return;
+      }
+
+      const content = this.stockManager.exportPortfolioJSON();
+      const uri = await vscode.window.showSaveDialog({
+        defaultUri: vscode.Uri.file('portfolio-export.json'),
+        title: '导出持有股',
+        filters: { 'JSON': ['json'] },
+      });
+      if (!uri) { return; }
+      const encoder = new TextEncoder();
+      await vscode.workspace.fs.writeFile(uri, encoder.encode(content));
+      vscode.window.showInformationMessage(`已导出 ${entries.length} 只持有股到 ${uri.fsPath}`);
+      return;
+    }
+
+    // 自选股 / 预购股：原逻辑
     const entries = this.stockManager.getAll();
     if (entries.length === 0) {
       vscode.window.showInformationMessage('暂无股票可导出');
@@ -434,6 +458,17 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
     const encoder = new TextEncoder();
     await vscode.workspace.fs.writeFile(uri, encoder.encode(content));
     vscode.window.showInformationMessage(`已导出 ${entries.length} 只股票到 ${uri.fsPath}`);
+  }
+
+  private async _handleImportPortfolio(json: string): Promise<void> {
+    if (!this._view) { return; }
+
+    try {
+      const result = await this.stockManager.importPortfolioJSON(json);
+      this._view.webview.postMessage({ type: 'importResult', result });
+    } catch (err) {
+      this._view.webview.postMessage({ type: 'importResult', result: { added: 0, skipped: 0, failed: 0, errors: [(err as Error).message] } });
+    }
   }
 
   private async _handleShowKline(code: string, days: number = 5): Promise<void> {
@@ -613,7 +648,6 @@ body{font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-for
     </div>
     <textarea id="planMemoInput" rows="3" placeholder="手动输入明日计划，像备忘录一样记录..."></textarea>
   </div>
-  <div id="emptyMsg" class="empty" style="display:none">暂无股票，点击 ＋ 添加</div>
 </div>
 <div id="formView" class="form-overlay">
   <div class="form-title" id="formTitle">添加股票</div>
@@ -656,6 +690,20 @@ body{font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-for
   <div class="form-btns">
     <button class="btn btn-cancel" id="importCancelBtn">取消</button>
     <button class="btn btn-ok" id="importOkBtn">导入</button>
+  </div>
+</div>
+<div id="importPortfolioView" class="form-overlay">
+  <div class="form-title">导入持有股</div>
+  <div class="field">
+    <label>持有股 JSON 数据</label>
+    <textarea id="importPortfolioInput" rows="8" placeholder="粘贴从导出获得的持有股 JSON 数据..."></textarea>
+    <div class="hint">支持从持有股导出的 JSON 文件内容粘贴导入，已有股票将跳过</div>
+  </div>
+  <div id="importPortfolioResult" class="import-result" style="display:none"></div>
+  <div class="form-error" id="importPortfolioError" style="display:none"></div>
+  <div class="form-btns">
+    <button class="btn btn-cancel" id="importPortfolioCancelBtn">取消</button>
+    <button class="btn btn-ok" id="importPortfolioOkBtn">导入</button>
   </div>
 </div>
 <div id="klineView" class="form-overlay">
@@ -710,7 +758,7 @@ window.addEventListener('message', e => {
   if (msg.type === 'searchResult') renderSearchResults(msg.results);
   if (msg.type === 'addSuccess' || msg.type === 'editSuccess') { showList(); }
   if (msg.type === 'error') {
-    const errDiv = $('importView').classList.contains('active') ? $('importError') : $('formError');
+    const errDiv = $('importPortfolioView').classList.contains('active') ? $('importPortfolioError') : $('importView').classList.contains('active') ? $('importError') : $('formError');
     errDiv.textContent = msg.text;
     errDiv.style.display = 'block';
   }
@@ -758,20 +806,16 @@ function renderList(msg, tab) {
     });
   }
   const container = $('stockList');
-  const empty = $('emptyMsg');
   const dailyProfitBar = $('dailyProfitBar');
   const totalBar = $('totalBar');
   const totalAmountBar = $('totalAmountBar');
   if ((!list || list.length === 0) && indices.length === 0) {
     container.innerHTML = '';
-    empty.textContent = '暂无股票';
-    empty.style.display = 'block';
     dailyProfitBar.style.display = 'none';
     totalBar.style.display = 'none';
     totalAmountBar.style.display = 'none';
     return;
   }
-  empty.style.display = 'none';
 
   // 渲染指数行（置顶）
   let indexHtml = '';
@@ -1086,7 +1130,7 @@ function switchTab(tab) {
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.tab === tab);
   });
-  $('importBtn').style.display = tab === 'watchlist' ? 'inline' : 'none';
+  $('importBtn').style.display = tab === 'wishlist' ? 'none' : 'inline';
   $('exportBtn').style.display = 'inline';
   $('sortBtn').style.display = 'inline';
   $('addBtn').style.display = 'inline';
@@ -1115,6 +1159,10 @@ $('sortBtn').addEventListener('click', () => {
 
 // ── 导入弹窗 ──
 function showImport() {
+  if (activeTab === 'portfolio') {
+    showImportPortfolio();
+    return;
+  }
   $('importInput').value = '';
   $('importError').style.display = 'none';
   $('importResult').style.display = 'none';
@@ -1131,10 +1179,34 @@ function hideImport() {
   $('listView').style.display = '';
 }
 
+// ── 持有股导入弹窗 ──
+function showImportPortfolio() {
+  $('importPortfolioInput').value = '';
+  $('importPortfolioError').style.display = 'none';
+  $('importPortfolioResult').style.display = 'none';
+  $('importPortfolioOkBtn').disabled = false;
+  $('importPortfolioOkBtn').textContent = '导入';
+  $('listView').style.display = 'none';
+  $('importPortfolioView').classList.add('active');
+  $('importPortfolioInput').focus();
+}
+
+function hideImportPortfolio() {
+  $('importPortfolioView').classList.remove('active');
+  $('listView').style.display = '';
+}
+
 function showImportResult(msg) {
-  $('importProgress').style.display = 'none';
-  $('importOkBtn').disabled = false;
-  $('importOkBtn').textContent = '导入';
+  // 判断是自选股还是持有股的结果
+  const isPortfolio = $('importPortfolioView').classList.contains('active');
+  if (isPortfolio) {
+    $('importPortfolioOkBtn').disabled = false;
+    $('importPortfolioOkBtn').textContent = '导入';
+  } else {
+    $('importProgress').style.display = 'none';
+    $('importOkBtn').disabled = false;
+    $('importOkBtn').textContent = '导入';
+  }
   const r = msg.result;
   let html = '<span class="ir-ok">成功添加: ' + r.added + ' 只</span>';
   if (r.skipped > 0) html += '<br><span class="ir-skip">已存在跳过: ' + r.skipped + ' 只</span>';
@@ -1144,12 +1216,18 @@ function showImportResult(msg) {
       html += '<div style="margin-top:4px;opacity:.8">' + r.errors.map(esc).join('<br>') + '</div>';
     }
   }
-  $('importResult').innerHTML = html;
-  $('importResult').style.display = 'block';
+  if (isPortfolio) {
+    $('importPortfolioResult').innerHTML = html;
+    $('importPortfolioResult').style.display = 'block';
+  } else {
+    $('importResult').innerHTML = html;
+    $('importResult').style.display = 'block';
+  }
 }
 
 $('importBtn').addEventListener('click', showImport);
 $('importCancelBtn').addEventListener('click', hideImport);
+$('importPortfolioCancelBtn').addEventListener('click', hideImportPortfolio);
 
 $('importOkBtn').addEventListener('click', () => {
   const text = $('importInput').value.trim();
@@ -1165,6 +1243,20 @@ $('importOkBtn').addEventListener('click', () => {
   $('importOkBtn').textContent = '导入中...';
   const lines = text.split('\\n').map(l => l.trim()).filter(l => l.length > 0);
   vscode.postMessage({ type: 'importStocks', lines });
+});
+
+$('importPortfolioOkBtn').addEventListener('click', () => {
+  const text = $('importPortfolioInput').value.trim();
+  if (!text) {
+    $('importPortfolioError').textContent = '请粘贴持有股 JSON 数据';
+    $('importPortfolioError').style.display = 'block';
+    return;
+  }
+  $('importPortfolioError').style.display = 'none';
+  $('importPortfolioResult').style.display = 'none';
+  $('importPortfolioOkBtn').disabled = true;
+  $('importPortfolioOkBtn').textContent = '导入中...';
+  vscode.postMessage({ type: 'importPortfolio', json: text });
 });
 
 // ── 导出 ──

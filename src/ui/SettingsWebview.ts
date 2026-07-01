@@ -116,7 +116,7 @@ select{width:auto;min-width:90px}
 <body>
 <div class="section">
   <div class="section-title">基础设置</div>
-  <div class="row"><label>刷新频率（秒）</label><input type="number" id="refreshInterval" min="1" max="3600" value="10"></div>
+  <div class="row"><label>刷新频率（秒）</label><input type="number" id="refreshInterval" min="1" max="3600" value="5"></div>
   <div class="row"><label>自动筛选预购股</label><label class="toggle"><input type="checkbox" id="autoWishlistEnabled"><span class="track"></span></label></div>
   <div class="hint">开启后会定期把连续下跌或近 5 日跌幅较大的自选股加入预购股。</div>
 </div>
@@ -149,7 +149,7 @@ window.addEventListener('message', e => {
 
 function fill(s) {
   if (!s) return;
-  $('refreshInterval').value = s.refreshInterval ?? 10;
+  $('refreshInterval').value = s.refreshInterval ?? 5;
   $('autoWishlistEnabled').checked = s.autoWishlistEnabled !== false;
   // 股票列表显示内容
   const sd = s.stockListDisplay || {};
@@ -165,7 +165,7 @@ function fill(s) {
   const defaultNames = ['上证指数','深证成指','创业板指','沪深300','科创50'];
   const defaultCodes = {'上证指数':'sh000001','深证成指':'sz399001','创业板指':'sz399006','沪深300':'sh000300','科创50':'sh000688'};
   currentKeywords = defaultCodes;
-  stockListKw = s.stockListKeywords || {};
+  stockListKw = s.stockListKeywords || { '上证指数': true };
   renderStockListKw();
 }
 
