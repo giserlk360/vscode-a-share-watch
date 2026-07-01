@@ -6,9 +6,14 @@
  */
 
 import * as vscode from 'vscode';
-import { PluginSettings, StockData, DEFAULT_SETTINGS, STORAGE_KEYS } from '../types';
+import { PluginSettings, StockData, StockEntry, KlineDay, DEFAULT_SETTINGS, STORAGE_KEYS } from '../types';
 import { IStockDataProvider } from '../data/StockDataProvider';
 import { IStockManager } from '../data/StockManager';
+
+const AUTO_WISHLIST_SCAN_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const AUTO_WISHLIST_KLINE_DAYS = 6;
+const AUTO_WISHLIST_DROP_THRESHOLD = -15;
+const AUTO_WISHLIST_CONSECUTIVE_DOWN_DAYS = 4;
 
 // ─── 依赖接口（避免循环依赖，通过注册方法注入） ────────────────────────────────
 
@@ -65,6 +70,9 @@ export class PriceMonitor implements IPriceMonitor {
 
   /** 已注册的状态栏轮播（可选，延迟注入） */
   private statusBarCarousel: IStatusBarCarousel | null = null;
+
+  /** 上次根据走势自动加入预购股的扫描时间 */
+  private lastAutoWishlistScanAt = 0;
 
   /**
    * 构造函数
@@ -241,6 +249,8 @@ export class PriceMonitor implements IPriceMonitor {
       return;
     }
 
+    await this._autoAddWishlistByTrend(watchlistEntries);
+
     // 分发给所有已注册的装饰器
     for (const decorator of this.decorators) {
       try {
@@ -266,6 +276,75 @@ export class PriceMonitor implements IPriceMonitor {
       }
     }
 
+  }
+
+  private async _autoAddWishlistByTrend(watchlistEntries: StockEntry[]): Promise<void> {
+    const now = Date.now();
+    if (now - this.lastAutoWishlistScanAt < AUTO_WISHLIST_SCAN_INTERVAL_MS) {
+      return;
+    }
+    this.lastAutoWishlistScanAt = now;
+
+    const wishlistCodes = new Set(this.stockManager.getWishlist().map(e => e.code.toLowerCase()));
+    const candidates = watchlistEntries.filter(e => !wishlistCodes.has(e.code.toLowerCase()));
+    if (candidates.length === 0) {
+      return;
+    }
+
+    for (const entry of candidates) {
+      try {
+        const kline = await this.dataProvider.fetchKline(entry.code, AUTO_WISHLIST_KLINE_DAYS);
+        const reason = this._getWishlistTrendReason(kline);
+        if (!reason) {
+          continue;
+        }
+
+        await this.stockManager.addWishlist({
+          ...entry,
+          carouselEnabled: entry.carouselEnabled ?? true,
+          addedAt: Date.now(),
+        });
+        wishlistCodes.add(entry.code.toLowerCase());
+        console.log(`[PriceMonitor] 自动加入预购股：${entry.name}（${entry.code}），原因：${reason}`);
+      } catch (err) {
+        const message = (err as Error).message || String(err);
+        if (!message.includes('已存在')) {
+          console.warn(`[PriceMonitor] 自动筛选预购股失败：${entry.code}`, err);
+        }
+      }
+    }
+  }
+
+  private _getWishlistTrendReason(kline: KlineDay[]): string | null {
+    const days = kline
+      .filter(d => Number.isFinite(d.close) && d.close > 0)
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    if (days.length < 5) {
+      return null;
+    }
+
+    let consecutiveDown = 0;
+    for (let i = 1; i < days.length; i++) {
+      if (days[i].close < days[i - 1].close) {
+        consecutiveDown++;
+        if (consecutiveDown >= AUTO_WISHLIST_CONSECUTIVE_DOWN_DAYS) {
+          return `连续下跌 ${consecutiveDown} 天`;
+        }
+      } else {
+        consecutiveDown = 0;
+      }
+    }
+
+    const recent5 = days.slice(-5);
+    const firstClose = recent5[0].close;
+    const lastClose = recent5[recent5.length - 1].close;
+    const dropRate = ((lastClose - firstClose) / firstClose) * 100;
+    if (dropRate <= AUTO_WISHLIST_DROP_THRESHOLD) {
+      return `近5日跌幅 ${dropRate.toFixed(2)}%`;
+    }
+
+    return null;
   }
 
   /**
