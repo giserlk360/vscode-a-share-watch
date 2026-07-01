@@ -130,6 +130,8 @@ export interface PluginSettings {
   carouselDisplay: CarouselDisplayOptions;
   /** 股票列表显示选项 */
   stockListDisplay: StockListDisplayOptions;
+  /** 是否自动将走势弱的自选股加入预购股 */
+  autoWishlistEnabled: boolean;
   /** 用户自定义特殊词汇别名，key: 别名, value: 股票代码（带前缀） */
   customKeywords: Record<string, string>;
   /** 特殊词汇轮播开关，key: 别名, value: 是否参与轮播 */
@@ -230,6 +232,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     sortOrder: null,
     activeTab: 'watchlist',
   },
+  autoWishlistEnabled: true,
   customKeywords: {
     '上证指数': 'sh000001',
     '深证成指': 'sz399001',

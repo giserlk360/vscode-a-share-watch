@@ -279,6 +279,10 @@ export class PriceMonitor implements IPriceMonitor {
   }
 
   private async _autoAddWishlistByTrend(watchlistEntries: StockEntry[]): Promise<void> {
+    if (this.settings.autoWishlistEnabled === false) {
+      return;
+    }
+
     const now = Date.now();
     if (now - this.lastAutoWishlistScanAt < AUTO_WISHLIST_SCAN_INTERVAL_MS) {
       return;

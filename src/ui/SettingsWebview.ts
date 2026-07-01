@@ -117,6 +117,8 @@ select{width:auto;min-width:90px}
 <div class="section">
   <div class="section-title">基础设置</div>
   <div class="row"><label>刷新频率（秒）</label><input type="number" id="refreshInterval" min="1" max="3600" value="10"></div>
+  <div class="row"><label>自动筛选预购股</label><label class="toggle"><input type="checkbox" id="autoWishlistEnabled"><span class="track"></span></label></div>
+  <div class="hint">开启后会定期把连续下跌或近 5 日跌幅较大的自选股加入预购股。</div>
 </div>
 <div class="section">
   <div class="section-title">股票列表显示内容</div>
@@ -148,6 +150,7 @@ window.addEventListener('message', e => {
 function fill(s) {
   if (!s) return;
   $('refreshInterval').value = s.refreshInterval ?? 10;
+  $('autoWishlistEnabled').checked = s.autoWishlistEnabled !== false;
   // 股票列表显示内容
   const sd = s.stockListDisplay || {};
   $('slShowCode').checked = sd.showCode !== false;
@@ -169,6 +172,7 @@ function fill(s) {
 function read() {
   return {
     refreshInterval: parseInt($('refreshInterval').value) || 10,
+    autoWishlistEnabled: $('autoWishlistEnabled').checked,
     stockListDisplay: {
       showCode: $('slShowCode').checked,
       showCurrentPrice: $('slShowCurrentPrice').checked,
@@ -191,7 +195,7 @@ function autoSave() {
 }
 
 // 为所有控件绑定即时保存
-['slShowCode','slShowCurrentPrice','slShowChangeRate','slShowPurchasePrice','slShowShares','slShowProfit','slShowPositionChangeRate','slShowPositionAmount'].forEach(id => {
+['autoWishlistEnabled','slShowCode','slShowCurrentPrice','slShowChangeRate','slShowPurchasePrice','slShowShares','slShowProfit','slShowPositionChangeRate','slShowPositionAmount'].forEach(id => {
   $(id).addEventListener('change', autoSave);
 });
 ['refreshInterval'].forEach(id => {

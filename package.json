@@ -1,7 +1,7 @@
 {
-  "name": "vscode-stock-monitor",
-  "displayName": "注释看盘",
-  "description": "在代码注释中实时查看 A 股行情，支持涨跌幅、持仓盈亏、当日盈亏内联显示，状态栏轮播和价格预警",
+  "name": "vscode-a-share-watch",
+  "displayName": "A股盯盘",
+  "description": "在 VS Code 侧边栏查看 A 股行情，支持自选股、持有股、预购股、持仓盈亏、状态栏轮播和走势查看",
   "version": "0.0.4",
   "publisher": "chenyangyang",
   "icon": "resources/icon.png",
@@ -20,7 +20,11 @@
     "A股",
     "股票",
     "行情",
-    "监控"
+    "监控",
+    "持仓",
+    "自选股",
+    "侧边栏",
+    "看板"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -31,7 +35,7 @@
       "activitybar": [
         {
           "id": "stock-monitor",
-          "title": "股票监控",
+          "title": "A股盯盘",
           "icon": "resources/icon.svg"
         }
       ]
@@ -69,10 +73,6 @@
       {
         "command": "vscode-stock-monitor.toggleCarousel",
         "title": "切换状态栏轮播"
-      },
-      {
-        "command": "vscode-stock-monitor.toggleStealthMode",
-        "title": "切换隐蔽模式"
       },
       {
         "command": "vscode-stock-monitor.refreshStocks",
@@ -114,17 +114,12 @@
       ]
     },
     "configuration": {
-      "title": "股票监控",
+      "title": "A股盯盘",
       "properties": {
         "vscode-stock-monitor.refreshInterval": {
           "type": "number",
           "default": 10,
           "description": "股票数据刷新间隔（秒）"
-        },
-        "vscode-stock-monitor.stealthMode": {
-          "type": "boolean",
-          "default": false,
-          "description": "隐蔽模式：使股票信息颜色与注释颜色一致"
         },
         "vscode-stock-monitor.carouselEnabled": {
           "type": "boolean",
@@ -135,26 +130,6 @@
           "type": "number",
           "default": 5,
           "description": "状态栏轮播间隔（秒）"
-        },
-        "vscode-stock-monitor.alertMode": {
-          "type": "string",
-          "enum": [
-            "popup",
-            "intense",
-            "both"
-          ],
-          "default": "popup",
-          "description": "价格预警方式：popup（弹窗）、intense（高强度）、both（两者）"
-        },
-        "vscode-stock-monitor.popupTemplate": {
-          "type": "string",
-          "default": "⚠️ {name} 已达目标价！当前价格：{price}，涨跌幅：{changeRate}%",
-          "description": "弹窗提示内容模板，支持 {name}、{price}、{changeRate} 占位符"
-        },
-        "vscode-stock-monitor.alertDuration": {
-          "type": "number",
-          "default": 60,
-          "description": "高强度预警状态栏固定显示时长（秒）"
         }
       }
     }

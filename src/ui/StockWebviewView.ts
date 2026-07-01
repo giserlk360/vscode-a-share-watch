@@ -488,90 +488,91 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
 <meta charset="UTF-8">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
+:root{--sm-border:var(--vscode-widget-border);--sm-panel:var(--vscode-editor-background);--sm-hover:var(--vscode-list-hoverBackground);--sm-muted:var(--vscode-descriptionForeground)}
 body{font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-foreground);background:var(--vscode-sideBar-background);padding:0;overflow:hidden;height:100vh}
-#listView{display:flex;flex-direction:column;height:100vh}
-.toolbar{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid var(--vscode-widget-border)}
-.toolbar-title{font-size:11px;font-weight:600;opacity:.7}
-.toolbar-btn{background:none;border:none;color:var(--vscode-foreground);cursor:pointer;font-size:14px;padding:2px 6px;border-radius:3px;opacity:.7}
-.toolbar-btn:hover{opacity:1;background:var(--vscode-toolbar-hoverBackground)}
-.stock-list{padding:0;flex:1;overflow-y:auto;min-height:0}
-.stock-item{display:flex;align-items:center;padding:6px 12px;border-bottom:1px solid var(--vscode-widget-border);cursor:default}
-.stock-index{background:var(--vscode-editor-background);opacity:.85}
-.stock-item:hover{background:var(--vscode-list-hoverBackground)}
+#listView{display:flex;flex-direction:column;height:100vh;min-width:0}
+.toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-bottom:1px solid var(--sm-border);background:var(--vscode-sideBar-background)}
+.toolbar-title{font-size:11px;font-weight:700;color:var(--vscode-foreground);opacity:.86;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.toolbar-btn{min-width:26px;height:24px;background:transparent;border:1px solid transparent;color:var(--vscode-foreground);cursor:pointer;font-size:12px;padding:0 7px;border-radius:4px;opacity:.75;line-height:22px}
+.toolbar-btn:hover{opacity:1;background:var(--vscode-toolbar-hoverBackground);border-color:var(--sm-border)}
+.toolbar-btn:active{transform:translateY(1px)}
+.stock-list{padding:4px 0;flex:1;overflow-y:auto;min-height:0}
+.stock-item{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--sm-border);cursor:default;min-height:54px}
+.stock-index{background:var(--sm-panel);opacity:.92}
+.stock-item:hover{background:var(--sm-hover)}
 .stock-info{flex:1;min-width:0}
-.stock-name{font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.stock-alias{font-size:10px;color:var(--vscode-descriptionForeground);margin-left:4px}
-.stock-code{font-size:10px;color:var(--vscode-descriptionForeground)}
-.stock-prices{display:flex;align-items:baseline;gap:6px;margin-top:2px}
-.stock-current{font-size:11px;font-weight:500}
-.stock-change{font-size:11px;font-weight:500}
-.stock-purchase{font-size:10px;color:var(--vscode-descriptionForeground)}
-.stock-shares{font-size:10px;color:var(--vscode-descriptionForeground);margin-top:2px}
-.stock-profit{font-size:10px;font-weight:500;margin-top:2px}
-.total-bar{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-top:1px solid var(--vscode-widget-border);background:var(--vscode-editor-background);font-size:11px}
-.total-label{font-weight:600;opacity:.8}
-.total-value{font-weight:700;font-size:12px}
+.stock-name{font-size:12px;font-weight:700;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stock-alias{font-size:10px;color:var(--sm-muted);margin-left:4px;font-weight:400}
+.stock-code{font-size:10px;color:var(--sm-muted)}
+.stock-prices{display:flex;align-items:baseline;gap:7px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stock-current{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
+.stock-change{font-size:11px;font-weight:700;font-variant-numeric:tabular-nums}
+.stock-purchase{font-size:10px;color:var(--sm-muted)}
+.stock-shares{font-size:10px;color:var(--sm-muted);margin-top:3px;white-space:nowrap}
+.stock-profit{font-size:10px;font-weight:700;margin-top:3px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.total-bar{display:flex;justify-content:space-between;align-items:center;padding:7px 10px;border-top:1px solid var(--sm-border);background:var(--sm-panel);font-size:11px;min-height:30px}
+.total-label{font-weight:700;opacity:.78}
+.total-value{font-weight:800;font-size:12px;font-variant-numeric:tabular-nums}
 .up{color:#F14C4C}
 .down{color:#73C991}
-.stock-actions{display:flex;gap:2px;opacity:0;transition:opacity .15s}
+.stock-actions{display:flex;gap:2px;opacity:0;transition:opacity .12s;flex:0 0 auto}
 .stock-item:hover .stock-actions{opacity:1}
-.act-btn{background:none;border:none;color:var(--vscode-foreground);cursor:pointer;font-size:13px;padding:2px 4px;border-radius:3px;opacity:.6}
-.act-btn:hover{opacity:1;background:var(--vscode-toolbar-hoverBackground)}
-.empty{text-align:center;padding:24px 12px;color:var(--vscode-descriptionForeground);font-size:11px}
+.act-btn{width:23px;height:23px;background:transparent;border:1px solid transparent;color:var(--vscode-foreground);cursor:pointer;font-size:12px;padding:0;border-radius:4px;opacity:.68;line-height:21px;text-align:center}
+.act-btn:hover{opacity:1;background:var(--vscode-toolbar-hoverBackground);border-color:var(--sm-border)}
+.empty{text-align:center;padding:28px 12px;color:var(--sm-muted);font-size:11px;line-height:1.6}
 /* 添加/编辑表单 */
-.form-overlay{display:none;padding:12px}
+.form-overlay{display:none;padding:12px;background:var(--vscode-sideBar-background);min-height:100vh}
 .form-overlay.active{display:block}
-.form-title{font-size:13px;font-weight:600;margin-bottom:12px}
-.field{margin-bottom:10px}
-.field label{display:block;font-size:11px;color:var(--vscode-foreground);margin-bottom:4px}
-.field input{width:100%;background:var(--vscode-input-background);border:1px solid var(--vscode-input-border);color:var(--vscode-input-foreground);font-size:12px;padding:5px 8px;outline:none}
+.form-title{font-size:13px;font-weight:700;margin-bottom:12px}
+.field{margin-bottom:11px}
+.field label{display:block;font-size:11px;color:var(--vscode-foreground);margin-bottom:5px;font-weight:600;opacity:.84}
+.field input{width:100%;height:28px;background:var(--vscode-input-background);border:1px solid var(--vscode-input-border);color:var(--vscode-input-foreground);font-size:12px;padding:5px 8px;outline:none;border-radius:3px}
 .field input:focus{border-color:var(--vscode-focusBorder)}
 .field input::placeholder{color:var(--vscode-input-placeholderForeground)}
-.search-results{border:1px solid var(--vscode-widget-border);background:var(--vscode-dropdown-background);max-height:160px;overflow-y:auto;display:none}
+.search-results{border:1px solid var(--sm-border);background:var(--vscode-dropdown-background);max-height:168px;overflow-y:auto;display:none;border-radius:4px;margin-top:4px}
 .search-results.active{display:block}
-.search-item{padding:5px 8px;cursor:pointer;font-size:11px;display:flex;justify-content:space-between}
-.search-item:hover{background:var(--vscode-list-hoverBackground)}
+.search-item{padding:7px 8px;cursor:pointer;font-size:11px;display:flex;justify-content:space-between;gap:8px}
+.search-item:hover{background:var(--sm-hover)}
 .search-item .si-name{font-weight:500}
-.search-item .si-code{color:var(--vscode-descriptionForeground)}
-.hint{font-size:10px;color:var(--vscode-descriptionForeground);margin-top:2px}
+.search-item .si-code{color:var(--sm-muted);font-variant-numeric:tabular-nums}
+.hint{font-size:10px;color:var(--sm-muted);margin-top:3px;line-height:1.4}
 .form-btns{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
-.btn{padding:5px 14px;font-size:11px;border:none;cursor:pointer;border-radius:2px}
+.btn{height:28px;padding:0 14px;font-size:11px;border:none;cursor:pointer;border-radius:3px;font-weight:600}
 .btn-cancel{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}
 .btn-ok{background:var(--vscode-button-background);color:var(--vscode-button-foreground);font-weight:600}
 .btn:hover{opacity:.85}
 .form-error{color:var(--vscode-errorForeground);font-size:11px;margin-top:6px;display:none}
 /* Tab 栏 */
-.tab-bar{display:flex;border-bottom:1px solid var(--vscode-widget-border);background:var(--vscode-editor-background)}
-.tab-btn{flex:1;padding:6px 0;font-size:11px;font-weight:500;background:none;border:none;border-bottom:2px solid transparent;color:var(--vscode-foreground);cursor:pointer;opacity:.7;transition:opacity .15s,border-color .15s}
-.tab-btn:hover{opacity:1}
-.tab-btn.active{opacity:1;border-bottom-color:var(--vscode-focusBorder);font-weight:600}
-.toolbar-actions{display:flex;gap:4px}
+.tab-bar{display:flex;gap:2px;padding:6px 8px 5px;border-bottom:1px solid var(--sm-border);background:var(--sm-panel)}
+.tab-btn{flex:1;height:27px;font-size:11px;font-weight:600;background:transparent;border:1px solid transparent;color:var(--vscode-foreground);cursor:pointer;opacity:.72;transition:opacity .12s,background .12s,border-color .12s;border-radius:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tab-btn:hover{opacity:1;background:var(--vscode-toolbar-hoverBackground)}
+.tab-btn.active{opacity:1;background:var(--vscode-list-activeSelectionBackground);color:var(--vscode-list-activeSelectionForeground);border-color:transparent}
 .sort-active{color:var(--vscode-focusBorder)!important;opacity:1!important}
 /* 导入弹窗 */
-#importView textarea{width:100%;background:var(--vscode-input-background);border:1px solid var(--vscode-input-border);color:var(--vscode-input-foreground);font-size:12px;padding:6px 8px;outline:none;resize:vertical;font-family:var(--vscode-font-family);line-height:1.4}
+#importView textarea{width:100%;background:var(--vscode-input-background);border:1px solid var(--vscode-input-border);color:var(--vscode-input-foreground);font-size:12px;padding:7px 8px;outline:none;resize:vertical;font-family:var(--vscode-font-family);line-height:1.45;border-radius:3px}
 #importView textarea:focus{border-color:var(--vscode-focusBorder)}
 #importView textarea::placeholder{color:var(--vscode-input-placeholderForeground)}
-.import-result{font-size:11px;padding:8px;background:var(--vscode-input-background);border:1px solid var(--vscode-widget-border);border-radius:3px;margin-bottom:8px;line-height:1.5}
+.import-result{font-size:11px;padding:8px;background:var(--vscode-input-background);border:1px solid var(--sm-border);border-radius:4px;margin-bottom:8px;line-height:1.5}
 .ir-ok{color:#73C991}
-.ir-skip{color:var(--vscode-descriptionForeground)}
+.ir-skip{color:var(--sm-muted)}
 .ir-fail{color:var(--vscode-errorForeground)}
 .import-progress{padding:4px 0;margin-bottom:4px}
 /* 走势图 */
 #klineChart svg{width:100%;height:140px;display:block}
 .kline-line{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .kline-dot{stroke-width:2;fill:var(--vscode-sideBar-background)}
-.kline-date{fill:var(--vscode-descriptionForeground);font-size:9px;font-family:var(--vscode-font-family)}
-.kline-price{fill:var(--vscode-descriptionForeground);font-size:9px;font-family:var(--vscode-font-family)}
-.kline-info{font-size:10px;color:var(--vscode-descriptionForeground);text-align:center;margin-top:6px;line-height:1.6}
-.kline-period{padding:3px 10px;font-size:10px;opacity:.6;background:none;border:1px solid var(--vscode-widget-border);color:var(--vscode-foreground);cursor:pointer;border-radius:2px}
+.kline-date{fill:var(--sm-muted);font-size:9px;font-family:var(--vscode-font-family)}
+.kline-price{fill:var(--sm-muted);font-size:9px;font-family:var(--vscode-font-family)}
+.kline-info{font-size:10px;color:var(--sm-muted);text-align:center;margin-top:6px;line-height:1.6}
+.kline-period{height:24px;padding:0 10px;font-size:10px;opacity:.65;background:transparent;border:1px solid var(--sm-border);color:var(--vscode-foreground);cursor:pointer;border-radius:4px}
 .kline-period.active{opacity:1;border-color:var(--vscode-focusBorder)}
 /* 明日计划备忘录 */
-.plan-memo{border-top:1px solid var(--vscode-widget-border);padding:8px 12px;background:var(--vscode-sideBar-background)}
+.plan-memo{border-top:1px solid var(--sm-border);padding:9px 10px 10px;background:var(--vscode-sideBar-background)}
 .plan-memo-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
-.plan-memo-title{font-size:11px;font-weight:600;color:var(--vscode-foreground);opacity:.75}
-.plan-memo-save{background:var(--vscode-button-background);border:none;color:var(--vscode-button-foreground);cursor:pointer;font-size:11px;padding:2px 10px;border-radius:2px;line-height:18px;flex:0 0 auto}
+.plan-memo-title{font-size:11px;font-weight:700;color:var(--vscode-foreground);opacity:.84}
+.plan-memo-save{height:24px;background:var(--vscode-button-background);border:1px solid transparent;color:var(--vscode-button-foreground);cursor:pointer;font-size:11px;padding:0 10px;border-radius:3px;line-height:22px;flex:0 0 auto;font-weight:600}
 .plan-memo-save:hover{opacity:.88}
-#planMemoInput{width:100%;min-height:58px;max-height:140px;background:var(--vscode-input-background);border:1px solid var(--vscode-input-border);color:var(--vscode-input-foreground);font-size:12px;padding:6px 8px;outline:none;resize:vertical;font-family:var(--vscode-font-family);line-height:1.4}
+#planMemoInput{width:100%;min-height:64px;max-height:150px;background:var(--vscode-input-background);border:1px solid var(--vscode-input-border);color:var(--vscode-input-foreground);font-size:12px;padding:7px 8px;outline:none;resize:vertical;font-family:var(--vscode-font-family);line-height:1.45;border-radius:4px}
 #planMemoInput:focus{border-color:var(--vscode-focusBorder)}
 #planMemoInput::placeholder{color:var(--vscode-input-placeholderForeground)}
 </style>
