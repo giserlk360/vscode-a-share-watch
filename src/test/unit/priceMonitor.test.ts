@@ -22,6 +22,8 @@ function makeMonitor(): PriceMonitor {
     resolveCode: jest.fn().mockResolvedValue(null),
     resolveMarketPrefix: jest.fn(code => code),
     fetchKline: jest.fn().mockResolvedValue([]),
+    fetchMinute: jest.fn().mockResolvedValue([]),
+    fetchMarketBreadth: jest.fn().mockResolvedValue({ up: 0, flat: 0, down: 0 }),
   };
   const ctx = new MockExtensionContext() as any;
   return new PriceMonitor(provider, new StockManager(ctx), ctx);

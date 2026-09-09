@@ -15,8 +15,14 @@ import { IPriceMonitor } from '../business/PriceMonitor';
 export class StockWebviewView implements vscode.WebviewViewProvider {
   public static readonly viewType = 'stockMonitor.stockView';
 
+  /** 涨跌家数刷新间隔（毫秒），低于行情刷新频率以减少请求 */
+  private static readonly BREADTH_TTL_MS = 60 * 1000;
+
   private _view?: vscode.WebviewView;
   private liveDataMap: Map<string, StockData> = new Map();
+  /** 缓存的两市涨跌家数 */
+  private breadth: { up: number; flat: number; down: number } | null = null;
+  private lastBreadthFetchAt = 0;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -67,6 +73,9 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
         case 'deleteStock':
           await this._handleDelete(msg.code, msg.fromTab || 'watchlist');
           break;
+        case 'deleteStocks':
+          await this._handleBatchDelete(msg.codes || [], msg.fromTab || 'watchlist');
+          break;
         case 'savePlanMemo':
           await this._handleSavePlanMemo(msg.text);
           break;
@@ -80,13 +89,16 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
           await this._handleExport();
           break;
         case 'showKline':
-          await this._handleShowKline(msg.code, msg.days || 5);
+          await this._handleShowKline(msg.code, msg.days ?? 5);
           break;
         case 'saveSortOrder':
           this._handleSaveSortOrder(msg.sortOrder);
           break;
         case 'saveActiveTab':
           this._handleSaveActiveTab(msg.activeTab);
+          break;
+        case 'filterWishlist':
+          await this._handleFilterWishlist();
           break;
       }
     });
@@ -104,6 +116,7 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
 
   private _sendStockList(): void {
     if (!this._view) { return; }
+    this._maybeRefreshBreadth();
     const settings = this.priceMonitor.getSettings();
 
     const mapEntry = (e: StockEntry) => {
@@ -142,7 +155,20 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
       }
     }
 
-    this._view.webview.postMessage({ type: 'stockList', watchlist, portfolio, wishlist, indices, planMemo: this.stockManager.getPlanMemo() });
+    this._view.webview.postMessage({ type: 'stockList', watchlist, portfolio, wishlist, indices, breadth: this.breadth, planMemo: this.stockManager.getPlanMemo() });
+  }
+
+  /** 按节流间隔刷新两市涨跌家数，成功且数据有变化时重发列表 */
+  private _maybeRefreshBreadth(): void {
+    const now = Date.now();
+    if (this.breadth && now - this.lastBreadthFetchAt < StockWebviewView.BREADTH_TTL_MS) { return; }
+    this.lastBreadthFetchAt = now;
+    this.dataProvider.fetchMarketBreadth().then(b => {
+      if (b.up + b.flat + b.down <= 0) { return; }
+      const changed = !this.breadth || this.breadth.up !== b.up || this.breadth.flat !== b.flat || this.breadth.down !== b.down;
+      this.breadth = b;
+      if (changed) { this._sendStockList(); }
+    }).catch(() => { /* 拉取失败时保留旧数据 */ });
   }
 
   private async _handleSearch(keyword: string): Promise<void> {
@@ -298,6 +324,48 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
       this._sendStockList();
     } catch (err) {
       this._view?.webview.postMessage({ type: 'error', text: (err as Error).message });
+    }
+  }
+
+  private async _handleBatchDelete(codes: string[], tab: 'watchlist' | 'portfolio' | 'wishlist'): Promise<void> {
+    try {
+      if (codes.length === 0) { return; }
+      const answer = await vscode.window.showWarningMessage(
+        `确定删除选中的 ${codes.length} 只股票？`,
+        { modal: true },
+        '删除'
+      );
+      if (answer !== '删除') { return; }
+      for (const code of codes) {
+        if (tab === 'portfolio') {
+          await this.stockManager.removePortfolio(code);
+        } else if (tab === 'wishlist') {
+          await this.stockManager.removeWishlist(code);
+        } else {
+          await this.stockManager.remove(code);
+        }
+      }
+      this._sendStockList();
+    } catch (err) {
+      this._view?.webview.postMessage({ type: 'error', text: (err as Error).message });
+    }
+  }
+
+  /** 手动触发回调股筛选：从自选股中筛选并加入预购股 */
+  private async _handleFilterWishlist(): Promise<void> {
+    try {
+      const result = await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: '正在筛选回调股...' },
+        () => this.priceMonitor.filterWishlistNow(),
+      );
+      if (result.added.length === 0) {
+        vscode.window.showInformationMessage('筛选完成：未发现符合条件的回调股（连续下跌4天或近5日跌幅超15%）');
+      } else {
+        vscode.window.showInformationMessage(`筛选完成：${result.added.length} 只加入预购股（${result.added.join('、')}）`);
+      }
+      this._sendStockList();
+    } catch (err) {
+      vscode.window.showErrorMessage(`筛选预购股失败：${(err as Error).message}`);
     }
   }
 
@@ -472,14 +540,24 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
   }
 
   private async _handleShowKline(code: string, days: number = 5): Promise<void> {
-    console.log('[StockWebview] showKline received:', code, 'days:', days);
     if (!this._view) { return; }
     try {
-      const kline = await this.dataProvider.fetchKline(code, days);
-      console.log('[StockWebview] kline data:', JSON.stringify(kline));
+      // days === 0 表示当日分时
+      const minute = days === 0;
+      const kline = minute
+        ? await this.dataProvider.fetchMinute(code)
+        : await this.dataProvider.fetchKline(code, days);
       const live = this.liveDataMap.get(code);
       const name = live?.name || this.stockManager.getByCode(code)?.name || code;
-      this._view.webview.postMessage({ type: 'klineData', data: kline, name, code, days });
+      this._view.webview.postMessage({
+        type: 'klineData',
+        mode: minute ? 'minute' : 'day',
+        data: kline,
+        name,
+        code,
+        days,
+        baseline: live?.closePrice,
+      });
     } catch (e) {
       console.error('[StockWebview] showKline error:', e);
       this._view?.webview.postMessage({ type: 'error', text: '获取走势数据失败' });
@@ -528,13 +606,23 @@ body{font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-for
 #listView{display:flex;flex-direction:column;height:100vh;min-width:0}
 .toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-bottom:1px solid var(--sm-border);background:var(--vscode-sideBar-background)}
 .toolbar-title{font-size:11px;font-weight:700;color:var(--vscode-foreground);opacity:.86;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.toolbar-btn{min-width:26px;height:24px;background:transparent;border:1px solid transparent;color:var(--vscode-foreground);cursor:pointer;font-size:12px;padding:0 7px;border-radius:4px;opacity:.75;line-height:22px}
+.toolbar-btn{min-width:28px;height:24px;background:transparent;border:1px solid transparent;color:var(--vscode-foreground);cursor:pointer;font-size:12px;padding:0 6px;border-radius:4px;opacity:.75;line-height:22px}
 .toolbar-btn:hover{opacity:1;background:var(--vscode-toolbar-hoverBackground);border-color:var(--sm-border)}
 .toolbar-btn:active{transform:translateY(1px)}
 .stock-list{padding:4px 0;flex:1;overflow-y:auto;min-height:0}
 .stock-item{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--sm-border);cursor:default;min-height:54px}
 .stock-index{background:var(--sm-panel);opacity:.92}
 .stock-item:hover{background:var(--sm-hover)}
+/* 两市涨跌家数 */
+.breadth-box{padding:6px 10px 7px;border-bottom:1px solid var(--sm-border)}
+.breadth-row{display:flex;align-items:baseline;gap:12px;font-size:11px;font-variant-numeric:tabular-nums}
+.br-item{font-weight:700}
+.br-flat{color:var(--sm-muted);font-weight:600}
+.br-total{margin-left:auto;color:var(--sm-muted);font-size:10px;font-weight:400}
+.breadth-bar{display:flex;height:3px;border-radius:2px;overflow:hidden;margin-top:5px}
+.bb-up{background:#F14C4C}
+.bb-flat{background:var(--vscode-descriptionForeground);opacity:.55}
+.bb-down{background:#73C991}
 .stock-info{flex:1;min-width:0}
 .stock-name{font-size:12px;font-weight:700;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .stock-alias{font-size:10px;color:var(--sm-muted);margin-left:4px;font-weight:400}
@@ -554,6 +642,13 @@ body{font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-for
 .stock-item:hover .stock-actions{opacity:1}
 .act-btn{width:23px;height:23px;background:transparent;border:1px solid transparent;color:var(--vscode-foreground);cursor:pointer;font-size:12px;padding:0;border-radius:4px;opacity:.68;line-height:21px;text-align:center}
 .act-btn:hover{opacity:1;background:var(--vscode-toolbar-hoverBackground);border-color:var(--sm-border)}
+/* 多选模式 */
+.stock-check{flex:0 0 auto;width:15px;height:15px;border:1px solid var(--vscode-checkbox-border);border-radius:3px;background:var(--vscode-checkbox-background);color:var(--vscode-checkbox-foreground);font-size:10px;line-height:13px;text-align:center;cursor:pointer;user-select:none}
+.stock-check.checked{background:var(--vscode-checkbox-selectBackground);border-color:var(--vscode-checkbox-selectBorder)}
+.stock-check.checked::after{content:'✓'}
+.select-mode .stock-actions{display:none}
+.select-mode .stock-item{cursor:pointer}
+.select-mode .stock-item.selected{background:var(--vscode-list-inactiveSelectionBackground)}
 .empty{text-align:center;padding:28px 12px;color:var(--sm-muted);font-size:11px;line-height:1.6}
 /* 添加/编辑表单 */
 .form-overlay{display:none;padding:12px;background:var(--vscode-sideBar-background);min-height:100vh}
@@ -593,7 +688,12 @@ body{font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-for
 .ir-fail{color:var(--vscode-errorForeground)}
 .import-progress{padding:4px 0;margin-bottom:4px}
 /* 走势图 */
-#klineChart svg{width:100%;height:140px;display:block}
+#klineChart{position:relative}
+#klineChart svg{width:100%;height:auto;display:block}
+.kline-tip{position:absolute;display:none;pointer-events:none;background:var(--vscode-dropdown-background);border:1px solid var(--sm-border);border-radius:4px;padding:5px 8px;font-size:10px;line-height:1.6;z-index:10;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.3)}
+.kline-tip .kt-date{font-weight:700;margin-bottom:1px}
+.kline-legend{display:flex;gap:12px;justify-content:center;font-size:10px;color:var(--sm-muted);margin-bottom:2px}
+.kl-sw{display:inline-block;width:12px;height:2px;border-radius:1px;vertical-align:middle;margin-right:4px}
 .kline-line{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .kline-dot{stroke-width:2;fill:var(--vscode-sideBar-background)}
 .kline-date{fill:var(--sm-muted);font-size:9px;font-family:var(--vscode-font-family)}
@@ -622,10 +722,15 @@ body{font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-for
   <div class="toolbar">
     <span class="toolbar-title" id="toolbarTitle">自选股</span>
     <div class="toolbar-actions">
-      <button class="toolbar-btn" id="sortBtn" title="按涨跌幅排序">↕</button>
-      <button class="toolbar-btn" id="exportBtn" title="导出">导出</button>
-      <button class="toolbar-btn" id="importBtn" title="导入">导入</button>
-      <button class="toolbar-btn" id="addBtn" title="添加股票">＋</button>
+      <button class="toolbar-btn" id="selectAllBtn" title="全选/取消全选" style="display:none">全选</button>
+      <button class="toolbar-btn" id="delSelBtn" title="删除所选" style="display:none">删除(0)</button>
+      <button class="toolbar-btn" id="cancelSelBtn" title="退出多选" style="display:none">取消</button>
+      <button class="toolbar-btn" id="selectBtn" title="多选删除">☑️</button>
+      <button class="toolbar-btn" id="sortBtn" title="按涨跌幅排序">↕️</button>
+      <button class="toolbar-btn" id="exportBtn" title="导出">📤</button>
+      <button class="toolbar-btn" id="importBtn" title="导入">📥</button>
+      <button class="toolbar-btn" id="filterBtn" title="从自选股中筛选回调股加入预购股" style="display:none">🔍</button>
+      <button class="toolbar-btn" id="addBtn" title="添加股票">➕</button>
     </div>
   </div>
   <div id="stockList" class="stock-list"></div>
@@ -709,8 +814,10 @@ body{font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-for
 <div id="klineView" class="form-overlay">
   <div class="form-title" id="klineTitle">股价走势</div>
   <div style="display:flex;gap:8px;margin-bottom:8px">
-    <button class="btn btn-ok kline-period active" id="kline5d">5日</button>
-    <button class="btn btn-ok kline-period" id="kline10d">10日</button>
+    <button class="btn btn-ok kline-period" data-days="0">分时</button>
+    <button class="btn btn-ok kline-period active" data-days="5">5日</button>
+    <button class="btn btn-ok kline-period" data-days="10">10日</button>
+    <button class="btn btn-ok kline-period" data-days="20">20日</button>
   </div>
   <div id="klineLoading" style="text-align:center;padding:20px;color:var(--vscode-descriptionForeground);font-size:11px">加载中...</div>
   <div id="klineChart"></div>
@@ -734,12 +841,17 @@ let allWatchlistData = null;   // 缓存自选股数据
 let allPortfolioData = null;   // 缓存持有股数据
 let allWishlistData = null;   // 缓存预购股数据
 let planMemoText = '';        // 缓存明日计划备忘录
-let klineDays = 5;             // 走势图天数（5 或 10）
+let klineDays = 5;             // 走势图天数（5/10/20；0=当日分时）
 let klineCode = '';            // 当前走势图股票代码
 let klineName = '';            // 当前走势图股票名称
+let klineMode = 'day';         // day=日K，minute=分时
+let klineBaseline = 0;         // 分时昨收基准价
 let allIndicesData = null;   // 缓存指数数据
+let allBreadthData = null;   // 缓存两市涨跌家数
 let sortOrder = null;         // null=默认, 'desc'=涨幅优先, 'asc'=跌幅优先
 let formTab = 'watchlist';    // 当前表单操作的 Tab 来源
+let selectMode = false;       // 多选模式
+let selectedCodes = new Set(); // 多选模式选中的股票代码
 
 // ── 消息处理 ──
 window.addEventListener('message', e => {
@@ -753,6 +865,7 @@ window.addEventListener('message', e => {
       $('planMemoInput').value = planMemoText;
     }
     allIndicesData = msg.indices || [];
+    allBreadthData = msg.breadth || null;
     renderList(msg, activeTab);
   }
   if (msg.type === 'searchResult') renderSearchResults(msg.results);
@@ -767,9 +880,15 @@ window.addEventListener('message', e => {
   if (msg.type === 'klineData') {
     klineCode = msg.code;
     klineName = msg.name;
-    klineDays = msg.days || 5;
+    klineDays = msg.days ?? 5;
+    klineMode = msg.mode || 'day';
+    klineBaseline = msg.baseline || 0;
     showKline();
-    renderKlineChart(msg.data, msg.name, msg.code, klineDays);
+    if (klineMode === 'minute') {
+      renderMinuteChart(msg.data, msg.name, msg.code, klineBaseline);
+    } else {
+      renderKlineChart(msg.data, msg.name, msg.code, klineDays);
+    }
   }
 });
 
@@ -781,7 +900,7 @@ function applyDisplayOptions(opts) {
   if (opts.sortOrder !== undefined) {
     sortOrder = opts.sortOrder;
     $('sortBtn').classList.toggle('sort-active', sortOrder !== null);
-    $('sortBtn').textContent = sortOrder === 'desc' ? '↓' : sortOrder === 'asc' ? '↑' : '↕';
+    $('sortBtn').textContent = sortOrder === 'desc' ? '⬇️' : sortOrder === 'asc' ? '⬆️' : '↕️';
   }
   // 恢复 Tab 状态
   if (opts.activeTab) {
@@ -792,10 +911,31 @@ function applyDisplayOptions(opts) {
 }
 
 // ── 渲染股票列表 ──
+// ── 两市涨跌家数（列表置顶） ──
+function buildBreadthHtml(b) {
+  const total = b.up + b.flat + b.down;
+  const pct = v => (v / total * 100).toFixed(2);
+  return '<div class="breadth-box">'
+    + '<div class="breadth-row">'
+    + '<span class="br-item up">红 ' + b.up + '</span>'
+    + '<span class="br-item br-flat">平 ' + b.flat + '</span>'
+    + '<span class="br-item down">绿 ' + b.down + '</span>'
+    + '<span class="br-total">共' + total + '家</span>'
+    + '</div>'
+    + '<div class="breadth-bar">'
+    + '<span class="bb-up" style="width:' + pct(b.up) + '%"></span>'
+    + '<span class="bb-flat" style="width:' + pct(b.flat) + '%"></span>'
+    + '<span class="bb-down" style="width:' + pct(b.down) + '%"></span>'
+    + '</div>'
+    + '</div>';
+}
+
 function renderList(msg, tab) {
   tab = tab || 'watchlist';
   let list = tab === 'portfolio' ? (msg.portfolio || []) : tab === 'wishlist' ? (msg.wishlist || []) : (msg.watchlist || []);
   const indices = msg.indices || [];
+  const b = msg.breadth;
+  const breadthHtml = (b && b.up + b.flat + b.down > 0) ? buildBreadthHtml(b) : '';
 
   // 按涨跌幅排序
   if (sortOrder === 'desc' || sortOrder === 'asc') {
@@ -805,11 +945,18 @@ function renderList(msg, tab) {
       return sortOrder === 'desc' ? rb - ra : ra - rb;
     });
   }
+
+  // 多选模式：清掉已不在列表中的选中项，并刷新工具栏计数
+  if (selectMode) {
+    const valid = new Set(list.map(s => s.code));
+    selectedCodes = new Set([...selectedCodes].filter(c => valid.has(c)));
+    updateSelectToolbar();
+  }
   const container = $('stockList');
   const dailyProfitBar = $('dailyProfitBar');
   const totalBar = $('totalBar');
   const totalAmountBar = $('totalAmountBar');
-  if ((!list || list.length === 0) && indices.length === 0) {
+  if ((!list || list.length === 0) && indices.length === 0 && !breadthHtml) {
     container.innerHTML = '';
     dailyProfitBar.style.display = 'none';
     totalBar.style.display = 'none';
@@ -909,7 +1056,11 @@ function renderList(msg, tab) {
           + '<button class="act-btn wish-btn" title="预购">☆</button>'
           + '<button class="act-btn del-btn" title="删除">✕</button>';
 
-    return '<div class="stock-item" data-code="' + esc(s.code) + '">'
+    const checked = selectMode && selectedCodes.has(s.code);
+    const checkHtml = selectMode ? '<div class="stock-check' + (checked ? ' checked' : '') + '"></div>' : '';
+
+    return '<div class="stock-item' + (checked ? ' selected' : '') + '" data-code="' + esc(s.code) + '">'
+      + checkHtml
       + '<div class="stock-info">'
       + '<div><span class="stock-name">' + esc(s.name) + '</span>' + aliasStr + '</div>'
       + (priceParts ? '<div class="stock-prices">' + priceParts + '</div>' : '')
@@ -920,7 +1071,7 @@ function renderList(msg, tab) {
       + '</div></div>';
   }).join('');
 
-  container.innerHTML = indexHtml + stockHtml;
+  container.innerHTML = breadthHtml + indexHtml + stockHtml;
 
   // 当日盈亏 & 总盈亏 & 总市值
   if (hasAnyPosition) {
@@ -961,6 +1112,15 @@ function renderList(msg, tab) {
       }
     });
   });
+
+  // 多选模式：点击整行切换选中（指数行无 data-code，不受影响）
+  if (selectMode) {
+    container.querySelectorAll('.stock-item[data-code]').forEach(item => {
+      item.addEventListener('click', () => {
+        toggleSelect(item.dataset.code);
+      });
+    });
+  }
 
   // 走势图按钮
   container.querySelectorAll('.kline-btn').forEach(btn => {
@@ -1124,9 +1284,88 @@ $('okBtn').addEventListener('click', () => {
   }
 });
 
+// ── 多选删除 ──
+function getCurrentList() {
+  const src = activeTab === 'portfolio' ? allPortfolioData : activeTab === 'wishlist' ? allWishlistData : allWatchlistData;
+  return src || [];
+}
+
+function rerenderList() {
+  if (allWatchlistData !== null) {
+    renderList({ watchlist: allWatchlistData, portfolio: allPortfolioData, wishlist: allWishlistData, indices: allIndicesData, breadth: allBreadthData }, activeTab);
+  }
+}
+
+function updateSelectToolbar() {
+  document.body.classList.toggle('select-mode', selectMode);
+  $('selectBtn').style.display = selectMode ? 'none' : 'inline';
+  $('sortBtn').style.display = selectMode ? 'none' : 'inline';
+  $('exportBtn').style.display = selectMode ? 'none' : 'inline';
+  $('importBtn').style.display = (selectMode || activeTab === 'wishlist') ? 'none' : 'inline';
+  $('addBtn').style.display = selectMode ? 'none' : 'inline';
+  $('selectAllBtn').style.display = selectMode ? 'inline' : 'none';
+  $('delSelBtn').style.display = selectMode ? 'inline' : 'none';
+  $('cancelSelBtn').style.display = selectMode ? 'inline' : 'none';
+  $('filterBtn').style.display = (!selectMode && activeTab === 'wishlist') ? 'inline' : 'none';
+  if (selectMode) {
+    const list = getCurrentList();
+    const allSelected = list.length > 0 && list.every(s => selectedCodes.has(s.code));
+    $('selectAllBtn').textContent = allSelected ? '取消全选' : '全选';
+    $('delSelBtn').textContent = '删除(' + selectedCodes.size + ')';
+    $('delSelBtn').style.opacity = selectedCodes.size > 0 ? '' : '.5';
+  }
+}
+
+function toggleSelect(code) {
+  if (selectedCodes.has(code)) { selectedCodes.delete(code); } else { selectedCodes.add(code); }
+  // 直接更新 DOM，避免整表重绘闪烁
+  const item = $('stockList').querySelector('.stock-item[data-code="' + code + '"]');
+  if (item) {
+    const on = selectedCodes.has(code);
+    item.classList.toggle('selected', on);
+    const chk = item.querySelector('.stock-check');
+    if (chk) { chk.classList.toggle('checked', on); }
+  }
+  updateSelectToolbar();
+}
+
+function exitSelectMode() {
+  selectMode = false;
+  selectedCodes.clear();
+  updateSelectToolbar();
+  rerenderList();
+}
+
+$('selectBtn').addEventListener('click', () => {
+  selectMode = true;
+  selectedCodes.clear();
+  updateSelectToolbar();
+  rerenderList();
+});
+
+$('cancelSelBtn').addEventListener('click', exitSelectMode);
+
+$('selectAllBtn').addEventListener('click', () => {
+  const list = getCurrentList();
+  const allSelected = list.length > 0 && list.every(s => selectedCodes.has(s.code));
+  selectedCodes = allSelected ? new Set() : new Set(list.map(s => s.code));
+  rerenderList();
+  updateSelectToolbar();
+});
+
+$('delSelBtn').addEventListener('click', () => {
+  if (selectedCodes.size === 0) { return; }
+  const codes = Array.from(selectedCodes);
+  exitSelectMode();
+  vscode.postMessage({ type: 'deleteStocks', codes, fromTab: activeTab });
+});
+
 // ── Tab 切换 ──
 function switchTab(tab) {
   activeTab = tab;
+  // 切换 Tab 时退出多选模式（选中集合按 Tab 隔离）
+  selectMode = false;
+  selectedCodes.clear();
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.tab === tab);
   });
@@ -1135,6 +1374,7 @@ function switchTab(tab) {
   $('sortBtn').style.display = 'inline';
   $('addBtn').style.display = 'inline';
   $('toolbarTitle').textContent = tab === 'watchlist' ? '自选股' : tab === 'portfolio' ? '持有股' : '预购股';
+  updateSelectToolbar();
   if (allWatchlistData !== null) {
     renderList({ watchlist: allWatchlistData, portfolio: allPortfolioData, wishlist: allWishlistData, indices: allIndicesData }, tab);
   }
@@ -1149,9 +1389,9 @@ $('tabWishlist').addEventListener('click', () => switchTab('wishlist'));
 $('sortBtn').addEventListener('click', () => {
   sortOrder = sortOrder === 'desc' ? 'asc' : sortOrder === 'asc' ? null : 'desc';
   $('sortBtn').classList.toggle('sort-active', sortOrder !== null);
-  $('sortBtn').textContent = sortOrder === 'desc' ? '↓' : sortOrder === 'asc' ? '↑' : '↕';
+  $('sortBtn').textContent = sortOrder === 'desc' ? '⬇️' : sortOrder === 'asc' ? '⬆️' : '↕️';
   if (allWatchlistData !== null) {
-    renderList({ watchlist: allWatchlistData, portfolio: allPortfolioData, wishlist: allWishlistData, indices: allIndicesData }, activeTab);
+    renderList({ watchlist: allWatchlistData, portfolio: allPortfolioData, wishlist: allWishlistData, indices: allIndicesData, breadth: allBreadthData }, activeTab);
   }
   // 持久化排序选择
   vscode.postMessage({ type: 'saveSortOrder', sortOrder });
@@ -1264,6 +1504,11 @@ $('exportBtn').addEventListener('click', () => {
   vscode.postMessage({ type: 'exportStocks' });
 });
 
+// ── 回调股筛选（预购股 Tab） ──
+$('filterBtn').addEventListener('click', () => {
+  vscode.postMessage({ type: 'filterWishlist' });
+});
+
 // ── 走势图 ──
 function showKline() {
   $('klineChart').innerHTML = '';
@@ -1273,7 +1518,7 @@ function showKline() {
   $('klineView').classList.add('active');
   // 更新周期按钮状态
   document.querySelectorAll('.kline-period').forEach(btn => {
-    btn.classList.toggle('active', (klineDays === 5 && btn.id === 'kline5d') || (klineDays === 10 && btn.id === 'kline10d'));
+    btn.classList.toggle('active', Number(btn.dataset.days) === klineDays);
   });
 }
 
@@ -1285,32 +1530,176 @@ function hideKline() {
 $('klineCloseBtn').addEventListener('click', hideKline);
 
 // ── 走势周期切换 ──
-$('kline5d').addEventListener('click', () => {
-  if (klineDays === 5) return;
-  klineDays = 5;
-  document.querySelectorAll('.kline-period').forEach(btn => {
-    btn.classList.toggle('active', btn.id === 'kline5d');
+document.querySelectorAll('.kline-period').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const days = Number(btn.dataset.days);
+    if (btn.dataset.days === undefined || klineDays === days) { return; }
+    klineDays = days;
+    document.querySelectorAll('.kline-period').forEach(b => {
+      b.classList.toggle('active', b === btn);
+    });
+    if (klineCode) {
+      $('klineChart').innerHTML = '';
+      $('klineInfo').textContent = '';
+      $('klineLoading').style.display = 'block';
+      vscode.postMessage({ type: 'showKline', code: klineCode, days });
+    }
   });
-  if (klineCode) {
-    $('klineChart').innerHTML = '';
-    $('klineInfo').textContent = '';
-    $('klineLoading').style.display = 'block';
-    vscode.postMessage({ type: 'showKline', code: klineCode, days: 5 });
-  }
 });
-$('kline10d').addEventListener('click', () => {
-  if (klineDays === 10) return;
-  klineDays = 10;
-  document.querySelectorAll('.kline-period').forEach(btn => {
-    btn.classList.toggle('active', btn.id === 'kline10d');
+
+// 成交量格式化（新浪接口单位为股，展示转为手）
+function fmtVol(v) {
+  const hands = v / 100;
+  if (hands >= 1e8) { return (hands / 1e8).toFixed(2) + '亿手'; }
+  if (hands >= 1e4) { return (hands / 1e4).toFixed(1) + '万手'; }
+  return Math.round(hands) + '手';
+}
+
+// ── 分时图 ──
+const MINUTE_AVG_COLOR = '#D7BA7D';
+
+function renderMinuteChart(data, name, code, baseline) {
+  $('klineLoading').style.display = 'none';
+  $('klineTitle').textContent = name + '（' + code + '） 分时走势';
+
+  if (!data || data.length === 0) {
+    $('klineChart').innerHTML = '<div class="empty">暂无分时数据</div>';
+    $('klineInfo').textContent = '';
+    return;
+  }
+
+  const n = data.length;
+  const closes = data.map(d => d.close);
+  // 均价线：累计成交额 / 累成交量（5分钟粒度的近似 VWAP）
+  let cumPV = 0, cumV = 0;
+  const avgs = data.map(d => {
+    cumPV += d.close * d.volume;
+    cumV += d.volume;
+    return cumV > 0 ? cumPV / cumV : d.close;
   });
-  if (klineCode) {
-    $('klineChart').innerHTML = '';
-    $('klineInfo').textContent = '';
-    $('klineLoading').style.display = 'block';
-    vscode.postMessage({ type: 'showKline', code: klineCode, days: 10 });
+
+  // 以昨收为中枢的对称区间，上下涨跌幅均等
+  const base = baseline > 0 ? baseline : data[0].open;
+  const hi = Math.max(...closes, ...avgs);
+  const lo = Math.min(...closes, ...avgs);
+  const maxDev = Math.max(hi - base, base - lo, base * 0.002) * 1.12;
+  const yMin = base - maxDev, yMax = base + maxDev, yRange = yMax - yMin;
+
+  const W = 280, H = 200;
+  const padL = 44, padR = 34, padT = 14, padB = 20;
+  const chartW = W - padL - padR;
+  const priceH = 114, volGap = 8, volH = 44;
+  const priceTop = padT, priceBottom = priceTop + priceH;
+  const volTop = priceBottom + volGap, volBottom = volTop + volH;
+
+  const toX = i => padL + (n === 1 ? chartW / 2 : (i / (n - 1)) * chartW);
+  const toY = v => priceTop + (priceH - ((v - yMin) / yRange) * priceH);
+  const step = Math.max(1, Math.ceil(n / 6));
+
+  const last = closes[n - 1];
+  const isUp = last >= base;
+  const lineColor = isUp ? '#F14C4C' : '#73C991';
+
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg">';
+
+  // Y 轴网格：左侧价格刻度，右侧涨跌幅刻度
+  const ySteps = 4;
+  for (let i = 0; i <= ySteps; i++) {
+    const yVal = yMin + (yRange / ySteps) * i;
+    const yPos = toY(yVal);
+    const pct = base > 0 ? (yVal - base) / base * 100 : 0;
+    svg += '<line x1="' + padL + '" y1="' + yPos + '" x2="' + (W - padR) + '" y2="' + yPos + '" stroke="var(--vscode-widget-border)" stroke-width="0.5" stroke-dasharray="2,2"/>';
+    svg += '<text x="' + (padL - 4) + '" y="' + (yPos + 3) + '" text-anchor="end" class="kline-price">' + yVal.toFixed(2) + '</text>';
+    svg += '<text x="' + (W - padR + 4) + '" y="' + (yPos + 3) + '" text-anchor="start" class="kline-price">' + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%</text>';
   }
-});
+
+  // 昨收基准线（中线）
+  svg += '<line x1="' + padL + '" y1="' + toY(base) + '" x2="' + (W - padR) + '" y2="' + toY(base) + '" stroke="var(--vscode-widget-border)" stroke-width="1"/>';
+
+  // 价格折线 + 均价线（分时点位密，不画数据点圆圈）
+  if (n > 1) {
+    svg += '<polyline points="' + closes.map((v, i) => toX(i) + ',' + toY(v)).join(' ') + '" class="kline-line" stroke="' + lineColor + '"/>';
+    svg += '<polyline points="' + avgs.map((v, i) => toX(i) + ',' + toY(v)).join(' ') + '" class="kline-line" stroke="' + MINUTE_AVG_COLOR + '"/>';
+  }
+
+  // 成交量柱：红涨绿跌（与前一根收盘比较，首根与开盘比较）
+  const maxV = Math.max(...data.map(d => d.volume), 1);
+  const slotW = chartW / n;
+  const barW = Math.max(2, Math.floor(slotW * 0.66));
+  data.forEach((d, i) => {
+    const prevClose = i > 0 ? data[i - 1].close : d.open;
+    const barColor = d.close >= prevClose ? '#F14C4C' : '#73C991';
+    const h = Math.max(1, Math.round(d.volume / maxV * volH));
+    svg += '<rect x="' + (toX(i) - barW / 2) + '" y="' + (volBottom - h) + '" width="' + barW + '" height="' + h + '" fill="' + barColor + '" opacity=".78"/>';
+  });
+  svg += '<line x1="' + padL + '" y1="' + volTop + '" x2="' + (W - padR) + '" y2="' + volTop + '" stroke="var(--vscode-widget-border)" stroke-width="0.5"/>';
+  svg += '<text x="' + (padL - 4) + '" y="' + (volTop + 3) + '" text-anchor="end" class="kline-price">' + fmtVol(maxV) + '</text>';
+  svg += '<text x="' + (padL - 4) + '" y="' + (volBottom + 3) + '" text-anchor="end" class="kline-price">0</text>';
+
+  // 时间轴标签
+  data.forEach((d, i) => {
+    if (i % step === 0 || i === n - 1) {
+      const t = d.date.length > 10 ? d.date.slice(11, 16) : d.date.slice(5);
+      svg += '<text x="' + toX(i) + '" y="' + (H - 6) + '" text-anchor="middle" class="kline-date">' + esc(t) + '</text>';
+    }
+  });
+
+  // hover 十字线
+  svg += '<line id="klineCross" x1="0" y1="' + priceTop + '" x2="0" y2="' + volBottom + '" stroke="var(--vscode-focusBorder)" stroke-width="1" stroke-dasharray="3,3" style="display:none"/>';
+  svg += '</svg>';
+
+  const chart = $('klineChart');
+  chart.innerHTML = '<div class="kline-legend"><span><span class="kl-sw" style="background:' + lineColor + '"></span>价格</span><span><span class="kl-sw" style="background:' + MINUTE_AVG_COLOR + '"></span>均价</span></div>'
+    + svg + '<div class="kline-tip" id="klineTip"></div>';
+
+  // hover：十字线 + 当时点明细 tooltip
+  const svgEl = chart.querySelector('svg');
+  const cross = svgEl.querySelector('#klineCross');
+  const tip = $('klineTip');
+  svgEl.addEventListener('mousemove', e => {
+    const rect = svgEl.getBoundingClientRect();
+    const vx = (e.clientX - rect.left) / rect.width * W;
+    let i = n === 1 ? 0 : Math.round((vx - padL) / chartW * (n - 1));
+    i = Math.max(0, Math.min(n - 1, i));
+    const x = toX(i);
+    cross.setAttribute('x1', x);
+    cross.setAttribute('x2', x);
+    cross.style.display = '';
+    const d = data[i];
+    const chg = d.close - base;
+    const chgPct = base > 0 ? chg / base * 100 : 0;
+    const tCls = chg >= 0 ? 'up' : 'down';
+    const tSign = chg >= 0 ? '+' : '';
+    const time = d.date.length > 10 ? d.date.slice(11, 16) : d.date.slice(5);
+    tip.innerHTML = '<div class="kt-date">' + esc(time) + '</div>'
+      + '<div>价 <span class="' + tCls + '">' + d.close.toFixed(2) + '</span>　' + tSign + chg.toFixed(2) + '（' + tSign + chgPct.toFixed(2) + '%）</div>'
+      + '<div>均价 ' + avgs[i].toFixed(2) + '</div>'
+      + '<div>量 ' + fmtVol(d.volume) + '</div>';
+    tip.style.display = 'block';
+    const chartRect = chart.getBoundingClientRect();
+    let tx = e.clientX - chartRect.left + 14;
+    const ty = e.clientY - chartRect.top - 8;
+    if (tx + tip.offsetWidth > chartRect.width) {
+      tx = Math.max(0, e.clientX - chartRect.left - tip.offsetWidth - 14);
+    }
+    tip.style.left = tx + 'px';
+    tip.style.top = ty + 'px';
+  });
+  svgEl.addEventListener('mouseleave', () => {
+    cross.style.display = 'none';
+    tip.style.display = 'none';
+  });
+
+  // 底部信息：最新/涨跌/均价/最高最低/总量
+  const chg = last - base;
+  const chgPct = base > 0 ? chg / base * 100 : 0;
+  const cls = chg >= 0 ? 'up' : 'down';
+  const sign = chg >= 0 ? '+' : '';
+  const totalV = data.reduce((a, d) => a + d.volume, 0);
+  $('klineInfo').innerHTML = '最新 <span class="' + cls + '">' + last.toFixed(2) + '</span>　<span class="' + cls + '">' + sign + chg.toFixed(2) + '（' + sign + chgPct.toFixed(2) + '%）</span>　均价 ' + avgs[n - 1].toFixed(2)
+    + '　最高 ' + Math.max(...data.map(d => d.high)).toFixed(2) + '　最低 ' + Math.min(...data.map(d => d.low)).toFixed(2)
+    + '　总量 ' + fmtVol(totalV);
+}
 
 function renderKlineChart(data, name, code, days) {
   $('klineLoading').style.display = 'none';
@@ -1331,21 +1720,26 @@ function renderKlineChart(data, name, code, days) {
   const yMax = maxP + pad;
   const yRange = yMax - yMin;
 
-  const W = 280, H = 140;
-  const padL = 50, padR = 10, padT = 15, padB = 24;
+  const n = data.length;
+  const W = 280, H = 200;
+  const padL = 50, padR = 24, padT = 14, padB = 20;
   const chartW = W - padL - padR;
-  const chartH = H - padT - padB;
+  // 上面板：价格折线；下面板：成交量柱。两面板共享 x 轴，各自独立 y 刻度（非双轴）
+  const priceH = 114, volGap = 8, volH = 44;
+  const priceTop = padT, priceBottom = priceTop + priceH;
+  const volTop = priceBottom + volGap, volBottom = volTop + volH;
 
-  const toX = i => padL + (data.length === 1 ? chartW / 2 : (i / (data.length - 1)) * chartW);
-  const toY = v => padT + chartH - ((v - yMin) / yRange) * chartH;
+  const toX = i => padL + (n === 1 ? chartW / 2 : (i / (n - 1)) * chartW);
+  const toY = v => priceTop + (priceH - ((v - yMin) / yRange) * priceH);
+  // 标签抽样步长：点位多时抽稀收盘价/日期标注，避免文字重叠
+  const step = Math.max(1, Math.ceil(n / 10));
 
-  const isUp = closes[closes.length - 1] >= closes[0];
+  const isUp = closes[n - 1] >= closes[0];
   const lineColor = isUp ? '#F14C4C' : '#73C991';
 
-  // 构建 SVG
   let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg">';
 
-  // Y轴参考线
+  // 价格面板 Y 轴参考线
   const ySteps = 4;
   for (let i = 0; i <= ySteps; i++) {
     const yVal = yMin + (yRange / ySteps) * i;
@@ -1355,30 +1749,88 @@ function renderKlineChart(data, name, code, days) {
   }
 
   // 折线
-  if (data.length > 1) {
+  if (n > 1) {
     const points = closes.map((v, i) => toX(i) + ',' + toY(v)).join(' ');
     svg += '<polyline points="' + points + '" class="kline-line" stroke="' + lineColor + '"/>';
   }
 
-  // 数据点 + 日期标签
+  // 成交量面板：柱色红涨绿跌（与前一日收盘比较，首日与开盘比较）
+  const maxV = Math.max(...data.map(d => d.volume), 1);
+  const slotW = chartW / n;
+  const barW = Math.max(2, Math.floor(slotW * 0.66));
+  data.forEach((d, i) => {
+    const prevClose = i > 0 ? data[i - 1].close : d.open;
+    const barColor = d.close >= prevClose ? '#F14C4C' : '#73C991';
+    const h = Math.max(1, Math.round(d.volume / maxV * volH));
+    svg += '<rect x="' + (toX(i) - barW / 2) + '" y="' + (volBottom - h) + '" width="' + barW + '" height="' + h + '" fill="' + barColor + '" opacity=".78"/>';
+  });
+  // 面板边界线 + 峰值刻度
+  svg += '<line x1="' + padL + '" y1="' + volTop + '" x2="' + (W - padR) + '" y2="' + volTop + '" stroke="var(--vscode-widget-border)" stroke-width="0.5"/>';
+  svg += '<text x="' + (padL - 4) + '" y="' + (volTop + 3) + '" text-anchor="end" class="kline-price">' + fmtVol(maxV) + '</text>';
+  svg += '<text x="' + (padL - 4) + '" y="' + (volBottom + 3) + '" text-anchor="end" class="kline-price">0</text>';
+
+  // 数据点 + 抽稀后的收盘价/日期标注
   data.forEach((d, i) => {
     const cx = toX(i), cy = toY(d.close);
     svg += '<circle cx="' + cx + '" cy="' + cy + '" r="3" class="kline-dot" stroke="' + lineColor + '"/>';
-    // 收盘价标注
-    svg += '<text x="' + cx + '" y="' + (cy - 6) + '" text-anchor="middle" class="kline-price" fill="' + lineColor + '">' + d.close.toFixed(2) + '</text>';
-    // 日期
-    svg += '<text x="' + cx + '" y="' + (H - 4) + '" text-anchor="middle" class="kline-date">' + esc(dates[i]) + '</text>';
+    if (i % step === 0) {
+      svg += '<text x="' + cx + '" y="' + (cy - 6) + '" text-anchor="middle" class="kline-price">' + d.close.toFixed(2) + '</text>';
+      svg += '<text x="' + cx + '" y="' + (H - 6) + '" text-anchor="middle" class="kline-date">' + esc(dates[i]) + '</text>';
+    }
   });
 
+  // hover 十字线
+  svg += '<line id="klineCross" x1="0" y1="' + priceTop + '" x2="0" y2="' + volBottom + '" stroke="var(--vscode-focusBorder)" stroke-width="1" stroke-dasharray="3,3" style="display:none"/>';
   svg += '</svg>';
-  $('klineChart').innerHTML = svg;
 
-  // 涨跌信息
-  const chg = closes[closes.length - 1] - closes[0];
+  const chart = $('klineChart');
+  chart.innerHTML = svg + '<div class="kline-tip" id="klineTip"></div>';
+
+  // hover：十字线 + 当日明细 tooltip
+  const svgEl = chart.querySelector('svg');
+  const cross = svgEl.querySelector('#klineCross');
+  const tip = $('klineTip');
+  svgEl.addEventListener('mousemove', e => {
+    const rect = svgEl.getBoundingClientRect();
+    const vx = (e.clientX - rect.left) / rect.width * W;
+    let i = n === 1 ? 0 : Math.round((vx - padL) / chartW * (n - 1));
+    i = Math.max(0, Math.min(n - 1, i));
+    const x = toX(i);
+    cross.setAttribute('x1', x);
+    cross.setAttribute('x2', x);
+    cross.style.display = '';
+    const d = data[i];
+    const prevClose = i > 0 ? data[i - 1].close : d.open;
+    const chg = d.close - prevClose;
+    const chgPct = prevClose !== 0 ? chg / prevClose * 100 : 0;
+    const tCls = chg >= 0 ? 'up' : 'down';
+    const tSign = chg >= 0 ? '+' : '';
+    tip.innerHTML = '<div class="kt-date">' + esc(d.date) + '</div>'
+      + '<div>开 ' + d.open.toFixed(2) + '　高 ' + d.high.toFixed(2) + '</div>'
+      + '<div>收 <span class="' + tCls + '">' + d.close.toFixed(2) + '</span>　低 ' + d.low.toFixed(2) + '</div>'
+      + '<div>量 ' + fmtVol(d.volume) + '　<span class="' + tCls + '">' + tSign + chg.toFixed(2) + '（' + tSign + chgPct.toFixed(2) + '%）</span></div>';
+    tip.style.display = 'block';
+    const chartRect = chart.getBoundingClientRect();
+    let tx = e.clientX - chartRect.left + 14;
+    const ty = e.clientY - chartRect.top - 8;
+    if (tx + tip.offsetWidth > chartRect.width) {
+      tx = Math.max(0, e.clientX - chartRect.left - tip.offsetWidth - 14);
+    }
+    tip.style.left = tx + 'px';
+    tip.style.top = ty + 'px';
+  });
+  svgEl.addEventListener('mouseleave', () => {
+    cross.style.display = 'none';
+    tip.style.display = 'none';
+  });
+
+  // 涨跌信息 + 成交量统计
+  const chg = closes[n - 1] - closes[0];
   const chgPct = closes[0] !== 0 ? (chg / closes[0] * 100) : 0;
   const cls = chg >= 0 ? 'up' : 'down';
   const sign = chg >= 0 ? '+' : '';
-  $('klineInfo').innerHTML = '<span class="' + cls + '">' + sign + chg.toFixed(2) + '（' + sign + chgPct.toFixed(2) + '%）</span>　期间最高 ' + Math.max(...data.map(d => d.high)).toFixed(2) + '　最低 ' + Math.min(...data.map(d => d.low)).toFixed(2);
+  const totalV = data.reduce((a, d) => a + d.volume, 0);
+  $('klineInfo').innerHTML = '<span class="' + cls + '">' + sign + chg.toFixed(2) + '（' + sign + chgPct.toFixed(2) + '%）</span>　期间最高 ' + Math.max(...data.map(d => d.high)).toFixed(2) + '　最低 ' + Math.min(...data.map(d => d.low)).toFixed(2) + '　总量 ' + fmtVol(totalV) + '　日均 ' + fmtVol(totalV / n);
 }
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }

@@ -16,6 +16,9 @@ export interface IStockDataProvider {
   resolveCode(input: string): Promise<string | null>;
   resolveMarketPrefix(code: string): string;
   fetchKline(code: string, days: number): Promise<KlineDay[]>;
+  fetchMinute(code: string): Promise<KlineDay[]>;
+  /** 沪深两市涨跌家数统计（up=红盘 flat=平盘 down=绿盘） */
+  fetchMarketBreadth(): Promise<{ up: number; flat: number; down: number }>;
 }
 
 // ─── 内存缓存 ─────────────────────────────────────────────────────────────────
@@ -42,6 +45,12 @@ const EMC_SEARCH_URL =
 
 /** 新浪财经行情接口（备用） */
 const SINA_URL = 'http://hq.sinajs.cn/list={codes}';
+
+/** 东方财富两市涨跌家数接口（f104=上涨 f105=下跌 f106=平盘，沪+深求和） */
+const EMC_BREADTH_URL =
+  'https://push2.eastmoney.com/api/qt/ulist.np/get' +
+  '?secids=1.000001,0.399001&fields=f104,f105,f106' +
+  '&ut=fa5fd1943c7b386f172d6893dbfba10b&fltt=2&invt=2';
 
 // ─── 工具函数 ─────────────────────────────────────────────────────────────────
 
@@ -474,6 +483,57 @@ export class StockDataProvider implements IStockDataProvider {
       }));
     } catch {
       return [];
+    }
+  }
+
+  /**
+   * 获取当日分时数据（5分钟粒度，一个交易日共48根）
+   * 复用新浪 K线 API（scale=5）；盘中拉取时最后48根可能包含
+   * 前一交易日的尾部数据，因此只保留最后一个交易日
+   */
+  async fetchMinute(code: string): Promise<KlineDay[]> {
+    const normalizedCode = this.resolveMarketPrefix(code);
+    const symbol = normalizedCode.replace(/^(sh|sz)/i, (m) => m.toLowerCase());
+
+    const url = `https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol=${symbol}&scale=5&ma=no&datalen=48`;
+
+    try {
+      const buf = await httpGet(url);
+      const text = decodeGBK(buf);
+      const data = JSON.parse(text);
+      if (!Array.isArray(data) || data.length === 0) { return []; }
+      const lastDay = String(data[data.length - 1].day || '').slice(0, 10);
+      return data
+        .filter((item: any) => String(item.day || '').slice(0, 10) === lastDay)
+        .map((item: any) => ({
+          date: String(item.day || ''),
+          open: Number(item.open) || 0,
+          close: Number(item.close) || 0,
+          high: Number(item.high) || 0,
+          low: Number(item.low) || 0,
+          volume: Number(item.volume) || 0,
+        }));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * 获取沪深两市涨跌家数
+   * 通过上证指数与深证成指的市场统计字段求和（不含北交所）
+   */
+  async fetchMarketBreadth(): Promise<{ up: number; flat: number; down: number }> {
+    try {
+      const buf = await httpGet(EMC_BREADTH_URL);
+      const json = JSON.parse(buf.toString('utf-8'));
+      const diff: any[] = json?.data?.diff ?? [];
+      const up = diff.reduce((a, d) => a + (Number(d.f104) || 0), 0);
+      const down = diff.reduce((a, d) => a + (Number(d.f105) || 0), 0);
+      const flat = diff.reduce((a, d) => a + (Number(d.f106) || 0), 0);
+      if (up + down + flat <= 0) { throw new Error('涨跌家数为空'); }
+      return { up, flat, down };
+    } catch {
+      return { up: 0, flat: 0, down: 0 };
     }
   }
 }
