@@ -127,6 +127,7 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
         alias: e.alias ?? '',
         purchasePrice: e.purchasePrice,
         shares: e.shares,
+        buyDate: e.buyDate ?? '',
         currentPrice: live?.currentPrice,
         closePrice: live?.closePrice,
         changeRate: live?.changeRate,
@@ -220,6 +221,7 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
         alias: msg.alias?.trim() || undefined,
         purchasePrice: msg.purchasePrice > 0 ? msg.purchasePrice : undefined,
         shares: msg.shares > 0 ? msg.shares : undefined,
+        buyDate: msg.buyDate || undefined,
         addedAt: Date.now(),
       };
       await this.stockManager.add(entry);
@@ -236,6 +238,7 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
         alias: msg.alias?.trim() || undefined,
         purchasePrice: msg.purchasePrice > 0 ? msg.purchasePrice : undefined,
         shares: msg.shares > 0 ? msg.shares : undefined,
+        buyDate: msg.buyDate || undefined,
       });
       this._sendStockList();
       this._view?.webview.postMessage({ type: 'editSuccess' });
@@ -251,6 +254,7 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
         name: msg.name,
         purchasePrice: msg.purchasePrice > 0 ? msg.purchasePrice : undefined,
         shares: msg.shares > 0 ? msg.shares : undefined,
+        buyDate: msg.buyDate || undefined,
         addedAt: Date.now(),
       };
       await this.stockManager.addPortfolio(entry);
@@ -266,6 +270,7 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
       await this.stockManager.updatePortfolio(msg.code, {
         purchasePrice: msg.purchasePrice > 0 ? msg.purchasePrice : undefined,
         shares: msg.shares > 0 ? msg.shares : undefined,
+        buyDate: msg.buyDate || undefined,
       });
       this._sendStockList();
       this._view?.webview.postMessage({ type: 'editSuccess' });
@@ -359,9 +364,13 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
         () => this.priceMonitor.filterWishlistNow(),
       );
       if (result.added.length === 0) {
-        vscode.window.showInformationMessage('筛选完成：未发现符合条件的回调股（连续下跌4天或近5日跌幅超15%）');
+        vscode.window.showInformationMessage('筛选完成：未发现符合条件的回调股（多维度回调评分未达门槛）');
       } else {
-        vscode.window.showInformationMessage(`筛选完成：${result.added.length} 只加入预购股（${result.added.join('、')}）`);
+        let msg = `筛选完成：${result.added.length} 只加入预购股（${result.added.join('、')}）`;
+        if (result.droppedByCap > 0) {
+          msg += `；另有 ${result.droppedByCap} 只达标但按评分排序未入选`;
+        }
+        vscode.window.showInformationMessage(msg);
       }
       this._sendStockList();
     } catch (err) {
@@ -729,7 +738,7 @@ body{font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-for
       <button class="toolbar-btn" id="sortBtn" title="按涨跌幅排序">↕️</button>
       <button class="toolbar-btn" id="exportBtn" title="导出">📤</button>
       <button class="toolbar-btn" id="importBtn" title="导入">📥</button>
-      <button class="toolbar-btn" id="filterBtn" title="从自选股中筛选回调股加入预购股" style="display:none">🔍</button>
+      <button class="toolbar-btn" id="filterBtn" title="从自选股中筛选回调股加入预购股（多维度评分排序，仅取评分最高的若干只）" style="display:none">🔍</button>
       <button class="toolbar-btn" id="addBtn" title="添加股票">➕</button>
     </div>
   </div>
@@ -774,6 +783,11 @@ body{font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-for
     <input id="sharesInput" type="number" min="0" step="100" placeholder="如: 100, 200...">
     <div class="hint">A股最小交易单位为100股（1手）</div>
   </div>
+  <div class="field" id="buyDateField">
+    <label>买入日期（可选）</label>
+    <input id="buyDateInput" type="date">
+    <div class="hint">当天买入的股票，当日盈亏按（现价−买入价）计算；其他日期或留空按昨收计算</div>
+  </div>
   <div class="form-error" id="formError"></div>
   <div class="form-btns">
     <button class="btn btn-cancel" id="cancelBtn">取消</button>
@@ -814,8 +828,8 @@ body{font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-for
 <div id="klineView" class="form-overlay">
   <div class="form-title" id="klineTitle">股价走势</div>
   <div style="display:flex;gap:8px;margin-bottom:8px">
-    <button class="btn btn-ok kline-period" data-days="0">分时</button>
-    <button class="btn btn-ok kline-period active" data-days="5">5日</button>
+    <button class="btn btn-ok kline-period active" data-days="0">分时</button>
+    <button class="btn btn-ok kline-period" data-days="5">5日</button>
     <button class="btn btn-ok kline-period" data-days="10">10日</button>
     <button class="btn btn-ok kline-period" data-days="20">20日</button>
   </div>
@@ -841,7 +855,7 @@ let allWatchlistData = null;   // 缓存自选股数据
 let allPortfolioData = null;   // 缓存持有股数据
 let allWishlistData = null;   // 缓存预购股数据
 let planMemoText = '';        // 缓存明日计划备忘录
-let klineDays = 5;             // 走势图天数（5/10/20；0=当日分时）
+let klineDays = 0;             // 走势图天数（5/10/20；0=当日分时，默认分时）
 let klineCode = '';            // 当前走势图股票代码
 let klineName = '';            // 当前走势图股票名称
 let klineMode = 'day';         // day=日K，minute=分时
@@ -1015,9 +1029,11 @@ function renderList(msg, tab) {
         const singleProfit = (s.currentPrice - s.purchasePrice) * s.shares;
         totalProfit += singleProfit;
         hasAnyPosition = true;
-        // 当日盈亏
+        // 当日盈亏：当日买入按（现价−买入价），隔日持仓按（现价−昨收）
         if (s.closePrice && s.closePrice > 0) {
-          totalDailyProfit += (s.currentPrice - s.closePrice) * s.shares;
+          const boughtToday = !!s.buyDate && s.buyDate === localDateStr(new Date());
+          const dailyBase = boughtToday ? s.purchasePrice : s.closePrice;
+          totalDailyProfit += (s.currentPrice - dailyBase) * s.shares;
         }
         if (displayOpts.showProfit) {
           const profitCls = singleProfit >= 0 ? 'up' : 'down';
@@ -1122,13 +1138,13 @@ function renderList(msg, tab) {
     });
   }
 
-  // 走势图按钮
+  // 走势图按钮（带上当前周期，默认分时）
   container.querySelectorAll('.kline-btn').forEach(btn => {
     btn.addEventListener('click', e => {
       const item = e.target.closest('.stock-item');
       const code = item.dataset.code;
       if (code) {
-        vscode.postMessage({ type: 'showKline', code });
+        vscode.postMessage({ type: 'showKline', code, days: klineDays });
       }
     });
   });
@@ -1180,6 +1196,7 @@ function showForm(stock, tab) {
   $('aliasInput').value = stock ? (stock.alias || '') : '';
   $('priceInput').value = stock?.purchasePrice ?? '';
   $('sharesInput').value = stock?.shares ?? '';
+  $('buyDateInput').value = stock?.buyDate || localDateStr(new Date());
   $('formError').style.display = 'none';
   $('searchResults').classList.remove('active');
   selectedResult = null;
@@ -1192,6 +1209,7 @@ function showForm(stock, tab) {
   $('aliasField').style.display = hideAlias ? 'none' : '';
   $('priceField').style.display = isWatchlistAdd ? 'none' : '';
   $('sharesField').style.display = isWatchlistAdd ? 'none' : '';
+  $('buyDateField').style.display = isWatchlistAdd ? 'none' : '';
 
   $('listView').style.display = 'none';
   $('formView').classList.add('active');
@@ -1252,6 +1270,7 @@ $('okBtn').addEventListener('click', () => {
   const alias = $('aliasInput').value.trim();
   const purchasePrice = parseFloat($('priceInput').value) || 0;
   const shares = parseInt($('sharesInput').value) || 0;
+  const buyDate = $('buyDateInput').value || undefined;
 
   console.log('[okBtn click] values:', { purchasePrice, shares });
 
@@ -1267,7 +1286,7 @@ $('okBtn').addEventListener('click', () => {
   if (editCode) {
     const editType = formTab === 'wishlist' ? 'editWishlist' : formTab === 'portfolio' ? 'editPortfolio' : 'editStock';
     console.log('[okBtn click] sending edit:', editType, { code: editCode, purchasePrice, shares });
-    vscode.postMessage({ type: editType, code: editCode, alias, purchasePrice, shares });
+    vscode.postMessage({ type: editType, code: editCode, alias, purchasePrice, shares, buyDate });
   } else {
     if (!selectedResult) {
       $('formError').textContent = '请先搜索并选择一只股票';
@@ -1279,7 +1298,7 @@ $('okBtn').addEventListener('click', () => {
       type: addType,
       code: selectedResult.code,
       name: selectedResult.name,
-      alias, purchasePrice, shares,
+      alias, purchasePrice, shares, buyDate,
     });
   }
 });
@@ -1834,6 +1853,11 @@ function renderKlineChart(data, name, code, days) {
 }
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+// 本地日期 YYYY-MM-DD（避免 toISOString 的 UTC 偏移）
+function localDateStr(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
 
 vscode.postMessage({ type: 'ready' });
 </script>

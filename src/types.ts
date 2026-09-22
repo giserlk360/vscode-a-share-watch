@@ -45,6 +45,8 @@ export interface StockEntry {
   purchasePrice?: number;
   /** 持仓数量（可选，须为100的倍数） */
   shares?: number;
+  /** 买入日期 YYYY-MM-DD（可选；等于当日时，当日盈亏按买入价而非昨收计算） */
+  buyDate?: string;
   /** 添加时间戳（毫秒） */
   addedAt: number;
 }

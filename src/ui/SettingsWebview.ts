@@ -117,7 +117,7 @@ select{width:auto;min-width:90px}
 <div class="section">
   <div class="section-title">基础设置</div>
   <div class="row"><label>刷新频率（秒）</label><input type="number" id="refreshInterval" min="1" max="3600" value="5"></div>
-  <div class="hint">预购股 Tab 提供「筛选」按钮，可手动从自选股中筛选连续下跌或近 5 日跌幅较大的回调股。</div>
+  <div class="hint">预购股 Tab 提供「筛选」按钮，按回调评分（高点回撤、区间跌幅、连跌阴跌、20日线乖离）从自选股中筛选，仅加入评分最高的若干只。</div>
 </div>
 <div class="section">
   <div class="section-title">股票列表显示内容</div>

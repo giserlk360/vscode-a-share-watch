@@ -10,9 +10,34 @@ import { PluginSettings, StockData, StockEntry, KlineDay, DEFAULT_SETTINGS, STOR
 import { IStockDataProvider } from '../data/StockDataProvider';
 import { IStockManager } from '../data/StockManager';
 
-const AUTO_WISHLIST_KLINE_DAYS = 6;
-const AUTO_WISHLIST_DROP_THRESHOLD = -15;
-const AUTO_WISHLIST_CONSECUTIVE_DOWN_DAYS = 4;
+/** 筛选用K线天数（需覆盖20日窗口及20日均线） */
+const AUTO_WISHLIST_KLINE_DAYS = 30;
+
+/** 回调评分制：各维度按强度计 1~2 分，总分达到门槛才入选，避免单一温和信号误入选 */
+const PULLBACK_MIN_SCORE = 3;
+
+/** 单次筛选最多加入预购股的数量（达标较多时按评分从高到低截取，保证结果有界且是回调最深的） */
+const PULLBACK_TOP_N = 10;
+
+/** 各维度两档阈值：达到弱档计1分，达到强档计2分 */
+/** 近20日高点回撤（%） */
+const PULLBACK_DRAWDOWN_MID = -10;
+const PULLBACK_DRAWDOWN_STRONG = -15;
+/** 近5日区间跌幅（%，急跌） */
+const PULLBACK_DROP5_MID = -8;
+const PULLBACK_DROP5_STRONG = -12;
+/** 近10日区间跌幅（%） */
+const PULLBACK_DROP10_MID = -12;
+/** 近20日区间跌幅（%） */
+const PULLBACK_DROP20_MID = -18;
+/** 尾部连续下跌天数 */
+const PULLBACK_STREAK_MID = 4;
+const PULLBACK_STREAK_STRONG = 5;
+/** 近10日下跌天数（阴跌，仅一档） */
+const PULLBACK_DOWN_DAYS_10 = 6;
+/** 收盘价相对20日均线乖离率（%，超卖） */
+const PULLBACK_BIAS_MID = -8;
+const PULLBACK_BIAS_STRONG = -12;
 
 // ─── 依赖接口（避免循环依赖，通过注册方法注入） ────────────────────────────────
 
@@ -40,8 +65,8 @@ export interface IPriceMonitor {
   updateSettings(patch: Partial<PluginSettings>): Promise<void>;
   /** 获取当前设置 */
   getSettings(): PluginSettings;
-  /** 手动触发：从自选股中筛选回调股加入预购股 */
-  filterWishlistNow(): Promise<{ added: string[] }>;
+  /** 手动触发：从自选股中筛选回调股加入预购股（评分制，按分数截取前若干只） */
+  filterWishlistNow(): Promise<{ added: string[]; droppedByCap: number }>;
   /** 释放所有资源 */
   dispose(): void;
 }
@@ -233,30 +258,22 @@ export class PriceMonitor implements IPriceMonitor {
 
   /**
    * 手动触发：从自选股中筛选回调股加入预购股
-   * 条件：连续下跌 AUTO_WISHLIST_CONSECUTIVE_DOWN_DAYS 天，或近5日跌幅 ≤ AUTO_WISHLIST_DROP_THRESHOLD
-   * @returns 新增的股票描述列表（名称+原因）
+   * 评分制：总分 ≥ PULLBACK_MIN_SCORE 达标；达标较多时按评分从高到低最多取 PULLBACK_TOP_N 只
+   * @returns 新增的股票描述列表（名称+评分+原因）及达标但未进前列的数量
    */
-  async filterWishlistNow(): Promise<{ added: string[] }> {
+  async filterWishlistNow(): Promise<{ added: string[]; droppedByCap: number }> {
     const watchlistEntries = this.stockManager.getAll();
     const wishlistCodes = new Set(this.stockManager.getWishlist().map(e => e.code.toLowerCase()));
     const candidates = watchlistEntries.filter(e => !wishlistCodes.has(e.code.toLowerCase()));
-    const added: string[] = [];
+    const qualified: Array<{ entry: StockEntry; score: number; reason: string }> = [];
 
     for (const entry of candidates) {
       try {
         const kline = await this.dataProvider.fetchKline(entry.code, AUTO_WISHLIST_KLINE_DAYS);
-        const reason = this._getWishlistTrendReason(kline);
-        if (!reason) {
-          continue;
+        const r = this._getWishlistTrendReason(kline);
+        if (r) {
+          qualified.push({ entry, ...r });
         }
-
-        await this.stockManager.addWishlist({
-          ...entry,
-          addedAt: Date.now(),
-        });
-        wishlistCodes.add(entry.code.toLowerCase());
-        added.push(`${entry.name}（${reason}）`);
-        console.log(`[PriceMonitor] 筛选加入预购股：${entry.name}（${entry.code}），原因：${reason}`);
       } catch (err) {
         const message = (err as Error).message || String(err);
         if (!message.includes('已存在')) {
@@ -267,39 +284,131 @@ export class PriceMonitor implements IPriceMonitor {
       await new Promise(r => setTimeout(r, 200));
     }
 
-    return { added };
+    // 评分从高到低，最多取前 N 只，保证结果有界且是回调最深的
+    qualified.sort((a, b) => b.score - a.score);
+    const picked = qualified.slice(0, PULLBACK_TOP_N);
+    const added: string[] = [];
+
+    for (const { entry, score, reason } of picked) {
+      try {
+        await this.stockManager.addWishlist({
+          ...entry,
+          addedAt: Date.now(),
+        });
+        wishlistCodes.add(entry.code.toLowerCase());
+        added.push(`${entry.name}（评分${score}：${reason}）`);
+        console.log(`[PriceMonitor] 筛选加入预购股：${entry.name}（${entry.code}），评分${score}，原因：${reason}`);
+      } catch (err) {
+        const message = (err as Error).message || String(err);
+        if (!message.includes('已存在')) {
+          console.warn(`[PriceMonitor] 加入预购股失败：${entry.code}`, err);
+        }
+      }
+    }
+
+    return { added, droppedByCap: qualified.length - picked.length };
   }
 
-  private _getWishlistTrendReason(kline: KlineDay[]): string | null {
+  /**
+   * 判断是否符合回调股条件（评分制，总分 ≥ PULLBACK_MIN_SCORE 才入选）
+   * 四个维度按强度计 1~2 分，命中的理由合并展示：
+   *   1. 近20日高点回撤 —— 比"固定起点点对点跌幅"更能刻画"涨完回落"，与回落起点无关
+   *   2. 多窗口区间跌幅 —— 5/10/20日梯度阈值，兼顾急跌与慢回调
+   *   3. 下跌结构 —— 尾部连续下跌（当前正在回调）或近10日阴跌天数
+   *   4. 超卖乖离 —— 收盘价显著低于20日均线，识别跌过头
+   * 单个强信号（2分）不单独入选，需更强或多维度相互印证
+   * @returns 命中时返回 { score, reason }，未达门槛返回 null
+   */
+  private _getWishlistTrendReason(kline: KlineDay[]): { score: number; reason: string } | null {
     const days = kline
       .filter(d => Number.isFinite(d.close) && d.close > 0)
       .sort((a, b) => a.date.localeCompare(b.date));
 
-    if (days.length < 5) {
+    if (days.length < 10) {
       return null;
     }
+    const closes = days.map(d => d.close);
+    const last = closes[closes.length - 1];
+    let score = 0;
+    const reasons: string[] = [];
 
-    let consecutiveDown = 0;
-    for (let i = 1; i < days.length; i++) {
-      if (days[i].close < days[i - 1].close) {
-        consecutiveDown++;
-        if (consecutiveDown >= AUTO_WISHLIST_CONSECUTIVE_DOWN_DAYS) {
-          return `连续下跌 ${consecutiveDown} 天`;
-        }
-      } else {
-        consecutiveDown = 0;
+    // 1) 近20日高点回撤
+    const win20 = closes.slice(-20);
+    const high20 = Math.max(...win20);
+    if (high20 > 0) {
+      const drawdown = (last - high20) / high20 * 100;
+      if (drawdown <= PULLBACK_DRAWDOWN_STRONG) {
+        score += 2;
+        reasons.push(`20日高点回撤${drawdown.toFixed(1)}%`);
+      } else if (drawdown <= PULLBACK_DRAWDOWN_MID) {
+        score += 1;
+        reasons.push(`20日高点回撤${drawdown.toFixed(1)}%`);
       }
     }
 
-    const recent5 = days.slice(-5);
-    const firstClose = recent5[0].close;
-    const lastClose = recent5[recent5.length - 1].close;
-    const dropRate = ((lastClose - firstClose) / firstClose) * 100;
-    if (dropRate <= AUTO_WISHLIST_DROP_THRESHOLD) {
-      return `近5日跌幅 ${dropRate.toFixed(2)}%`;
+    // 2) 多窗口区间跌幅（急跌优先报告更短窗口）
+    const rangeDrop = (n: number): number | null => {
+      if (closes.length < n + 1) { return null; }
+      const start = closes[closes.length - 1 - n];
+      return start > 0 ? (last - start) / start * 100 : null;
+    };
+    const drop5 = rangeDrop(5);
+    const drop10 = rangeDrop(10);
+    const drop20 = rangeDrop(20);
+    if (drop5 !== null && drop5 <= PULLBACK_DROP5_STRONG) {
+      score += 2;
+      reasons.push(`近5日${drop5.toFixed(1)}%`);
+    } else if (drop5 !== null && drop5 <= PULLBACK_DROP5_MID) {
+      score += 1;
+      reasons.push(`近5日${drop5.toFixed(1)}%`);
+    } else if (drop10 !== null && drop10 <= PULLBACK_DROP10_MID) {
+      score += 1;
+      reasons.push(`近10日${drop10.toFixed(1)}%`);
+    } else if (drop20 !== null && drop20 <= PULLBACK_DROP20_MID) {
+      score += 1;
+      reasons.push(`近20日${drop20.toFixed(1)}%`);
     }
 
-    return null;
+    // 3) 下跌结构：尾部连续下跌（从最新一根往回数）或近10日阴跌天数
+    let streak = 0;
+    for (let i = closes.length - 1; i > 0 && closes[i] < closes[i - 1]; i--) {
+      streak++;
+    }
+    if (streak >= PULLBACK_STREAK_STRONG) {
+      score += 2;
+      reasons.push(`连续下跌${streak}天`);
+    } else if (streak >= PULLBACK_STREAK_MID) {
+      score += 1;
+      reasons.push(`连续下跌${streak}天`);
+    } else {
+      const win11 = closes.slice(-11);
+      let downDays = 0;
+      for (let i = 1; i < win11.length; i++) {
+        if (win11[i] < win11[i - 1]) { downDays++; }
+      }
+      if (downDays >= PULLBACK_DOWN_DAYS_10) {
+        score += 1;
+        reasons.push(`近10日${downDays}天下跌`);
+      }
+    }
+
+    // 4) 超卖乖离：收盘价显著低于20日均线
+    if (closes.length >= 20) {
+      const ma20 = win20.reduce((a, v) => a + v, 0) / win20.length;
+      const bias = (last - ma20) / ma20 * 100;
+      if (bias <= PULLBACK_BIAS_STRONG) {
+        score += 2;
+        reasons.push(`低于20日线${Math.abs(bias).toFixed(1)}%`);
+      } else if (bias <= PULLBACK_BIAS_MID) {
+        score += 1;
+        reasons.push(`低于20日线${Math.abs(bias).toFixed(1)}%`);
+      }
+    }
+
+    if (score < PULLBACK_MIN_SCORE) {
+      return null;
+    }
+    return { score, reason: reasons.join('、') };
   }
 
   /**

@@ -588,11 +588,15 @@ export class CommentDecorator implements ICommentDecorator {
       }
     }
 
-    // 当日盈亏：(当前价 - 昨收价) × 股数
+    // 当日盈亏：当日买入按（现价−买入价），隔日持仓按（现价−昨收）
     if (d.showDailyProfit) {
       const entry = this.stockEntries.find(e => e.code === stockData.code);
       if (entry?.shares && entry.shares > 0 && stockData.closePrice > 0) {
-        const dailyProfit = (stockData.currentPrice - stockData.closePrice) * entry.shares;
+        const now = new Date();
+        const today = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+        const boughtToday = !!entry.buyDate && entry.buyDate === today && !!entry.purchasePrice && entry.purchasePrice > 0;
+        const dailyBase = boughtToday ? entry.purchasePrice! : stockData.closePrice;
+        const dailyProfit = (stockData.currentPrice - dailyBase) * entry.shares;
         const sign = dailyProfit >= 0 ? '+' : '-';
         parts.push(`今${sign}${Math.abs(dailyProfit).toFixed(2)}`);
       }
