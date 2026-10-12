@@ -128,6 +128,8 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
         purchasePrice: e.purchasePrice,
         shares: e.shares,
         buyDate: e.buyDate ?? '',
+        targetPrice: e.targetPrice,
+        stopLossPrice: e.stopLossPrice,
         currentPrice: live?.currentPrice,
         closePrice: live?.closePrice,
         changeRate: live?.changeRate,
@@ -222,6 +224,8 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
         purchasePrice: msg.purchasePrice > 0 ? msg.purchasePrice : undefined,
         shares: msg.shares > 0 ? msg.shares : undefined,
         buyDate: msg.buyDate || undefined,
+        targetPrice: msg.targetPrice > 0 ? msg.targetPrice : undefined,
+        stopLossPrice: msg.stopLossPrice > 0 ? msg.stopLossPrice : undefined,
         addedAt: Date.now(),
       };
       await this.stockManager.add(entry);
@@ -239,6 +243,8 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
         purchasePrice: msg.purchasePrice > 0 ? msg.purchasePrice : undefined,
         shares: msg.shares > 0 ? msg.shares : undefined,
         buyDate: msg.buyDate || undefined,
+        targetPrice: msg.targetPrice > 0 ? msg.targetPrice : undefined,
+        stopLossPrice: msg.stopLossPrice > 0 ? msg.stopLossPrice : undefined,
       });
       this._sendStockList();
       this._view?.webview.postMessage({ type: 'editSuccess' });
@@ -255,6 +261,8 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
         purchasePrice: msg.purchasePrice > 0 ? msg.purchasePrice : undefined,
         shares: msg.shares > 0 ? msg.shares : undefined,
         buyDate: msg.buyDate || undefined,
+        targetPrice: msg.targetPrice > 0 ? msg.targetPrice : undefined,
+        stopLossPrice: msg.stopLossPrice > 0 ? msg.stopLossPrice : undefined,
         addedAt: Date.now(),
       };
       await this.stockManager.addPortfolio(entry);
@@ -271,6 +279,8 @@ export class StockWebviewView implements vscode.WebviewViewProvider {
         purchasePrice: msg.purchasePrice > 0 ? msg.purchasePrice : undefined,
         shares: msg.shares > 0 ? msg.shares : undefined,
         buyDate: msg.buyDate || undefined,
+        targetPrice: msg.targetPrice > 0 ? msg.targetPrice : undefined,
+        stopLossPrice: msg.stopLossPrice > 0 ? msg.stopLossPrice : undefined,
       });
       this._sendStockList();
       this._view?.webview.postMessage({ type: 'editSuccess' });
@@ -636,12 +646,13 @@ body{font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-for
 .stock-name{font-size:12px;font-weight:700;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .stock-alias{font-size:10px;color:var(--sm-muted);margin-left:4px;font-weight:400}
 .stock-code{font-size:10px;color:var(--sm-muted)}
-.stock-prices{display:flex;align-items:baseline;gap:7px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stock-prices{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:7px;row-gap:3px;margin-top:2px;min-width:0}
 .stock-current{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
 .stock-change{font-size:11px;font-weight:700;font-variant-numeric:tabular-nums}
 .stock-purchase{font-size:10px;color:var(--sm-muted)}
-.stock-shares{font-size:10px;color:var(--sm-muted);margin-top:3px;white-space:nowrap}
-.stock-profit{font-size:10px;font-weight:700;margin-top:3px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.stock-detail{display:flex;flex-wrap:wrap;align-items:center;column-gap:10px;row-gap:3px;margin-top:3px;min-width:0}
+.stock-shares{font-size:10px;color:var(--sm-muted);white-space:nowrap}
+.stock-profit{font-size:10px;font-weight:700;margin-top:0;font-variant-numeric:tabular-nums;white-space:nowrap}
 .total-bar{display:flex;justify-content:space-between;align-items:center;padding:7px 10px;border-top:1px solid var(--sm-border);background:var(--sm-panel);font-size:11px;min-height:30px}
 .total-label{font-weight:700;opacity:.78}
 .total-value{font-weight:800;font-size:12px;font-variant-numeric:tabular-nums}
@@ -710,6 +721,8 @@ body{font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-for
 .kline-info{font-size:10px;color:var(--sm-muted);text-align:center;margin-top:6px;line-height:1.6}
 .kline-period{height:24px;padding:0 10px;font-size:10px;opacity:.65;background:transparent;border:1px solid var(--sm-border);color:var(--vscode-foreground);cursor:pointer;border-radius:4px}
 .kline-period.active{opacity:1;border-color:var(--vscode-focusBorder)}
+.kline-nav{height:24px;min-width:26px;padding:0 7px;background:transparent;border:1px solid var(--sm-border);color:var(--vscode-foreground);cursor:pointer;border-radius:4px;font-size:14px;line-height:1;opacity:.75}
+.kline-nav:hover{opacity:1;background:var(--vscode-toolbar-hoverBackground);border-color:var(--vscode-focusBorder)}
 /* 明日计划备忘录 */
 .plan-memo{border-top:1px solid var(--sm-border);padding:9px 10px 10px;background:var(--vscode-sideBar-background)}
 .plan-memo-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
@@ -788,6 +801,16 @@ body{font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-for
     <input id="buyDateInput" type="date">
     <div class="hint">当天买入的股票，当日盈亏按（现价−买入价）计算；其他日期或留空按昨收计算</div>
   </div>
+  <div class="field" id="targetPriceField">
+    <label>目标价（可选）</label>
+    <input id="targetPriceInput" type="number" min="0" step="0.01" placeholder="目标价">
+    <div class="hint">展示现价距目标价的剩余空间</div>
+  </div>
+  <div class="field" id="stopLossField">
+    <label>止损价（可选）</label>
+    <input id="stopLossInput" type="number" min="0" step="0.01" placeholder="止损价">
+    <div class="hint">现价跌破止损价时红字警示</div>
+  </div>
   <div class="form-error" id="formError"></div>
   <div class="form-btns">
     <button class="btn btn-cancel" id="cancelBtn">取消</button>
@@ -826,7 +849,11 @@ body{font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-for
   </div>
 </div>
 <div id="klineView" class="form-overlay">
-  <div class="form-title" id="klineTitle">股价走势</div>
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+    <button class="kline-nav" id="klinePrevBtn" title="上一只（←）">‹</button>
+    <div class="form-title" id="klineTitle" style="flex:1;text-align:center;margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">股价走势</div>
+    <button class="kline-nav" id="klineNextBtn" title="下一只（→）">›</button>
+  </div>
   <div style="display:flex;gap:8px;margin-bottom:8px">
     <button class="btn btn-ok kline-period active" data-days="0">分时</button>
     <button class="btn btn-ok kline-period" data-days="5">5日</button>
@@ -849,7 +876,7 @@ let selectedResult = null; // 搜索选中的结果 {code, name}
 let searchTimer = null;
 let planMemoDirty = false;
 let planMemoSaving = false;
-let displayOpts = { showCode:true, showCurrentPrice:true, showChangeRate:true, showPurchasePrice:true, showShares:true, showProfit:true, showPositionChangeRate:false, showPositionAmount:false };
+let displayOpts = { showCode:true, showCurrentPrice:true, showChangeRate:true, showPurchasePrice:true, showShares:true, showProfit:true, showPositionChangeRate:false, showPositionAmount:false, showDailyProfit:true };
 let activeTab = 'watchlist'; // 当前激活的 Tab
 let allWatchlistData = null;   // 缓存自选股数据
 let allPortfolioData = null;   // 缓存持有股数据
@@ -1030,15 +1057,22 @@ function renderList(msg, tab) {
         totalProfit += singleProfit;
         hasAnyPosition = true;
         // 当日盈亏：当日买入按（现价−买入价），隔日持仓按（现价−昨收）
+        let dailyProfit = null;
         if (s.closePrice && s.closePrice > 0) {
           const boughtToday = !!s.buyDate && s.buyDate === localDateStr(new Date());
           const dailyBase = boughtToday ? s.purchasePrice : s.closePrice;
-          totalDailyProfit += (s.currentPrice - dailyBase) * s.shares;
+          dailyProfit = (s.currentPrice - dailyBase) * s.shares;
+          totalDailyProfit += dailyProfit;
         }
         if (displayOpts.showProfit) {
           const profitCls = singleProfit >= 0 ? 'up' : 'down';
           const profitSign = singleProfit >= 0 ? '+' : '-';
           profitHtml = '<span class="stock-profit ' + profitCls + '">盈亏: ' + profitSign + Math.abs(singleProfit).toFixed(2) + '</span>';
+        }
+        if (displayOpts.showDailyProfit && dailyProfit !== null) {
+          const dCls = dailyProfit >= 0 ? 'up' : 'down';
+          const dSign = dailyProfit >= 0 ? '+' : '-';
+          profitHtml += ' <span class="stock-profit ' + dCls + '">今盈: ' + dSign + Math.abs(dailyProfit).toFixed(2) + '</span>';
         }
         if (displayOpts.showPositionChangeRate) {
           const posRate = (s.currentPrice - s.purchasePrice) / s.purchasePrice * 100;
@@ -1050,6 +1084,35 @@ function renderList(msg, tab) {
       if (displayOpts.showPositionAmount && hasLive && s.shares && s.shares > 0) {
         const amount = s.currentPrice * s.shares;
         profitHtml += ' <span class="stock-shares">市值:' + amount.toFixed(2) + '</span>';
+      }
+    }
+
+    // 目标价：显示现价距目标的剩余空间，达到目标时提示已达
+    if (s.targetPrice && s.targetPrice > 0) {
+      if (hasLive) {
+        const room = (s.targetPrice - s.currentPrice) / s.targetPrice * 100;
+        if (room <= 0) {
+          profitHtml += ' <span class="stock-profit up">目标: ' + s.targetPrice.toFixed(2) + ' ✓已到</span>';
+        } else {
+          profitHtml += ' <span class="stock-shares">目标: ' + s.targetPrice.toFixed(2) + ' +' + room.toFixed(1) + '%</span>';
+        }
+      } else {
+        profitHtml += ' <span class="stock-shares">目标: ' + s.targetPrice.toFixed(2) + '</span>';
+      }
+    }
+
+    // 止损价：跌破时红字警示，接近时（2%以内）提示距离
+    if (s.stopLossPrice && s.stopLossPrice > 0) {
+      if (hasLive) {
+        if (s.currentPrice <= s.stopLossPrice) {
+          profitHtml += ' <span class="stock-profit down">止损: ' + s.stopLossPrice.toFixed(2) + ' ⚠已破</span>';
+        } else {
+          const gap = (s.currentPrice - s.stopLossPrice) / s.currentPrice * 100;
+          const lossHtml = '止损: ' + s.stopLossPrice.toFixed(2) + (gap <= 2 ? ' ⚠仅剩' + gap.toFixed(1) + '%' : '');
+          profitHtml += ' <span class="' + (gap <= 2 ? 'stock-profit down' : 'stock-shares') + '">' + lossHtml + '</span>';
+        }
+      } else {
+        profitHtml += ' <span class="stock-shares">止损: ' + s.stopLossPrice.toFixed(2) + '</span>';
       }
     }
 
@@ -1080,7 +1143,7 @@ function renderList(msg, tab) {
       + '<div class="stock-info">'
       + '<div><span class="stock-name">' + esc(s.name) + '</span>' + aliasStr + '</div>'
       + (priceParts ? '<div class="stock-prices">' + priceParts + '</div>' : '')
-      + (sharesHtml || profitHtml ? '<div style="display:flex;justify-content:space-between;align-items:center">' + sharesHtml + profitHtml + '</div>' : '')
+      + (sharesHtml || profitHtml ? '<div class="stock-detail">' + sharesHtml + profitHtml + '</div>' : '')
       + '</div>'
       + '<div class="stock-actions">'
       + actionBtns
@@ -1197,6 +1260,8 @@ function showForm(stock, tab) {
   $('priceInput').value = stock?.purchasePrice ?? '';
   $('sharesInput').value = stock?.shares ?? '';
   $('buyDateInput').value = stock?.buyDate || localDateStr(new Date());
+  $('targetPriceInput').value = stock?.targetPrice ?? '';
+  $('stopLossInput').value = stock?.stopLossPrice ?? '';
   $('formError').style.display = 'none';
   $('searchResults').classList.remove('active');
   selectedResult = null;
@@ -1210,6 +1275,8 @@ function showForm(stock, tab) {
   $('priceField').style.display = isWatchlistAdd ? 'none' : '';
   $('sharesField').style.display = isWatchlistAdd ? 'none' : '';
   $('buyDateField').style.display = isWatchlistAdd ? 'none' : '';
+  $('targetPriceField').style.display = isWatchlistAdd ? 'none' : '';
+  $('stopLossField').style.display = isWatchlistAdd ? 'none' : '';
 
   $('listView').style.display = 'none';
   $('formView').classList.add('active');
@@ -1271,6 +1338,8 @@ $('okBtn').addEventListener('click', () => {
   const purchasePrice = parseFloat($('priceInput').value) || 0;
   const shares = parseInt($('sharesInput').value) || 0;
   const buyDate = $('buyDateInput').value || undefined;
+  const targetPrice = parseFloat($('targetPriceInput').value) || 0;
+  const stopLossPrice = parseFloat($('stopLossInput').value) || 0;
 
   console.log('[okBtn click] values:', { purchasePrice, shares });
 
@@ -1286,7 +1355,7 @@ $('okBtn').addEventListener('click', () => {
   if (editCode) {
     const editType = formTab === 'wishlist' ? 'editWishlist' : formTab === 'portfolio' ? 'editPortfolio' : 'editStock';
     console.log('[okBtn click] sending edit:', editType, { code: editCode, purchasePrice, shares });
-    vscode.postMessage({ type: editType, code: editCode, alias, purchasePrice, shares, buyDate });
+    vscode.postMessage({ type: editType, code: editCode, alias, purchasePrice, shares, buyDate, targetPrice, stopLossPrice });
   } else {
     if (!selectedResult) {
       $('formError').textContent = '请先搜索并选择一只股票';
@@ -1298,7 +1367,7 @@ $('okBtn').addEventListener('click', () => {
       type: addType,
       code: selectedResult.code,
       name: selectedResult.name,
-      alias, purchasePrice, shares, buyDate,
+      alias, purchasePrice, shares, buyDate, targetPrice, stopLossPrice,
     });
   }
 });
@@ -1719,6 +1788,29 @@ function renderMinuteChart(data, name, code, baseline) {
     + '　最高 ' + Math.max(...data.map(d => d.high)).toFixed(2) + '　最低 ' + Math.min(...data.map(d => d.low)).toFixed(2)
     + '　总量 ' + fmtVol(totalV);
 }
+
+// ── 走势图上一只/下一只切换 ──
+function switchKlineStock(step) {
+  const list = getCurrentList();
+  if (list.length === 0) { return; }
+  let idx = list.findIndex(s => s.code === klineCode);
+  if (idx === -1) { idx = 0; }
+  const next = list[(idx + step + list.length) % list.length];
+  $('klineChart').innerHTML = '';
+  $('klineInfo').textContent = '';
+  $('klineLoading').style.display = 'block';
+  vscode.postMessage({ type: 'showKline', code: next.code, days: klineDays });
+}
+$('klinePrevBtn').addEventListener('click', () => switchKlineStock(-1));
+$('klineNextBtn').addEventListener('click', () => switchKlineStock(1));
+document.addEventListener('keydown', e => {
+  // 走势视图打开时支持左右方向键切换（输入框聚焦时忽略）
+  if (!$('klineView').classList.contains('active')) { return; }
+  const tag = (e.target && e.target.tagName) || '';
+  if (tag === 'INPUT' || tag === 'TEXTAREA') { return; }
+  if (e.key === 'ArrowLeft') { switchKlineStock(-1); }
+  if (e.key === 'ArrowRight') { switchKlineStock(1); }
+});
 
 function renderKlineChart(data, name, code, days) {
   $('klineLoading').style.display = 'none';

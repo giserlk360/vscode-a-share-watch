@@ -6,10 +6,12 @@
       "Bash(cp d:/project/vscode-stock-monitor-master/dist/extension.js 'C:\\\\Users\\\\李康/.vscode/extensions/chenyangyang.vscode-stock-monitor-0.0.4/dist/extension.js')",
       "Bash(cp d:/project/vscode-stock-monitor-master/dist/extension.js.map 'C:\\\\Users\\\\李康/.vscode/extensions/chenyangyang.vscode-stock-monitor-0.0.4/dist/extension.js.map')",
       "Bash(cp d:/project/vscode-stock-monitor-master/dist/extension.js ~/.vscode/extensions/chenyangyang.vscode-stock-monitor-0.0.4/dist/extension.js 2>&1)",
-      "Bash(cp d:/project/vscode-stock-monitor-master/dist/extension.js ~/.vscode/extensions/chenyangyang.vscode-stock-monitor-0.0.4/dist/extension.js)"
+      "Bash(cp d:/project/vscode-stock-monitor-master/dist/extension.js ~/.vscode/extensions/chenyangyang.vscode-stock-monitor-0.0.4/dist/extension.js)",
+      "Bash(cd d:/project/vscode-stock-monitor-master && sed -n '/interface StockListDisplayOptions/,/^}/p' src/types.ts && grep -n \"showPositionAmount\" src/types.ts src/ui/SettingsWebview.ts)"
     ],
     "additionalDirectories": [
-      "C:\\Users\\李康\\.vscode\\extensions\\chenyangyang.vscode-stock-monitor-0.0.4\\dist"
+      "C:\\Users\\李康\\.vscode\\extensions\\chenyangyang.vscode-stock-monitor-0.0.4\\dist",
+      "d:\\project\\vscode-stock-monitor-master\\src"
     ]
   }
 }

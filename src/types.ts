@@ -47,6 +47,10 @@ export interface StockEntry {
   shares?: number;
   /** 买入日期 YYYY-MM-DD（可选；等于当日时，当日盈亏按买入价而非昨收计算） */
   buyDate?: string;
+  /** 目标价（可选，用于展示现价距目标的剩余空间） */
+  targetPrice?: number;
+  /** 止损价（可选，现价跌破时红字警示） */
+  stopLossPrice?: number;
   /** 添加时间戳（毫秒） */
   addedAt: number;
 }
@@ -89,6 +93,8 @@ export interface StockListDisplayOptions {
   showPositionChangeRate: boolean;
   /** 显示持仓金额（当前价×股数） */
   showPositionAmount: boolean;
+  /** 显示当日盈亏（当日买入按现价−买入价，否则按现价−昨收） */
+  showDailyProfit: boolean;
   /** 列表排序：null=默认, 'desc'=涨幅优先, 'asc'=跌幅优先 */
   sortOrder: null | 'desc' | 'asc';
   /** 当前激活的 Tab：'watchlist' | 'wishlist' | 'portfolio' */
@@ -196,6 +202,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     showProfit: true,
     showPositionChangeRate: true,
     showPositionAmount: true,
+    showDailyProfit: true,
     sortOrder: null,
     activeTab: 'watchlist',
   },

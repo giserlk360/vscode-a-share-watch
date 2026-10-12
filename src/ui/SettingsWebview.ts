@@ -130,6 +130,7 @@ select{width:auto;min-width:90px}
   <div class="row"><label>持仓盈亏</label><label class="toggle"><input type="checkbox" id="slShowProfit"><span class="track"></span></label></div>
   <div class="row"><label>持仓涨跌幅</label><label class="toggle"><input type="checkbox" id="slShowPositionChangeRate"><span class="track"></span></label></div>
   <div class="row"><label>持仓金额</label><label class="toggle"><input type="checkbox" id="slShowPositionAmount"><span class="track"></span></label></div>
+  <div class="row"><label>当日盈亏</label><label class="toggle"><input type="checkbox" id="slShowDailyProfit"><span class="track"></span></label></div>
   <div class="section-title" style="margin-top:8px">指数列表显示</div>
   <div class="hint" style="margin-bottom:6px">选择哪些指数显示在股票列表中</div>
   <div id="stockListKwList"></div>
@@ -159,6 +160,7 @@ function fill(s) {
   $('slShowProfit').checked = sd.showProfit !== false;
   $('slShowPositionChangeRate').checked = !!sd.showPositionChangeRate;
   $('slShowPositionAmount').checked = !!sd.showPositionAmount;
+  $('slShowDailyProfit').checked = sd.showDailyProfit !== false;
   // 指数列表显示
   const defaultNames = ['上证指数','深证成指','创业板指','沪深300','科创50'];
   const defaultCodes = {'上证指数':'sh000001','深证成指':'sz399001','创业板指':'sz399006','沪深300':'sh000300','科创50':'sh000688'};
@@ -179,6 +181,7 @@ function read() {
       showProfit: $('slShowProfit').checked,
       showPositionChangeRate: $('slShowPositionChangeRate').checked,
       showPositionAmount: $('slShowPositionAmount').checked,
+      showDailyProfit: $('slShowDailyProfit').checked,
     },
     stockListKeywords: { ...stockListKw },
   };
@@ -192,7 +195,7 @@ function autoSave() {
 }
 
 // 为所有控件绑定即时保存
-['slShowCode','slShowCurrentPrice','slShowChangeRate','slShowPurchasePrice','slShowShares','slShowProfit','slShowPositionChangeRate','slShowPositionAmount'].forEach(id => {
+['slShowCode','slShowCurrentPrice','slShowChangeRate','slShowPurchasePrice','slShowShares','slShowProfit','slShowPositionChangeRate','slShowPositionAmount','slShowDailyProfit'].forEach(id => {
   $(id).addEventListener('change', autoSave);
 });
 ['refreshInterval'].forEach(id => {
